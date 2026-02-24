@@ -19,6 +19,10 @@
   "keywords": ["telegram", "bot", "shifocrm"],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
     "express": "^4.18.2",
