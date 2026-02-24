@@ -1,4 +1,18 @@
-require('dotenv').config();
+// Railway'da .env fayl bo'lmasligi mumkin, lekin environment variables mavjud
+// dotenv faqat local development uchun
+if (require('fs').existsSync('.env')) {
+  require('dotenv').config();
+}
+
+// Debug: Environment variables mavjudligini tekshirish (secret'larni ko'rsatmaydi)
+console.log('🔍 Environment variables tekshirilmoqda...');
+console.log('   TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? '✅ Mavjud' : '❌ Yo\'q');
+console.log('   SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Mavjud' : '❌ Yo\'q');
+console.log('   SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Mavjud' : '❌ Yo\'q');
+console.log('   PORT:', process.env.PORT || '3001 (default)');
+console.log('   HOST:', process.env.HOST || '0.0.0.0 (default)');
+console.log('');
+
 const { app, PORT } = require('./server');
 // Bot avtomatik ishga tushadi (bot.js import qilinganda)
 
