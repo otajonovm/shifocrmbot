@@ -3,9 +3,12 @@ const { isValidPatientId, normalizePhone, isValidPhone } = require('./utils/vali
 const { getTelegramChatIdByPhone, saveTelegramChatId } = require('./repository/telegramChatRepo');
 const { getPatientById, getPatientByPhone } = require('./repository/patientRepo');
 
-const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 
 if (!botToken) {
+  console.error('❌ TELEGRAM_BOT_TOKEN topilmadi!');
+  console.error('   Environment variable: TELEGRAM_BOT_TOKEN');
+  console.error('   Railway dashboard → Variables → TELEGRAM_BOT_TOKEN qo\'shing');
   throw new Error('TELEGRAM_BOT_TOKEN .env faylda ko\'rsatilgan bo\'lishi kerak');
 }
 
