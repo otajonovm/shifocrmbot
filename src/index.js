@@ -4,13 +4,31 @@ if (require('fs').existsSync('.env')) {
   require('dotenv').config();
 }
 
-// Debug: Environment variables mavjudligini tekshirish (secret'larni ko'rsatmaydi)
+// Debug: Environment variables mavjudligini tekshirish
 console.log('🔍 Environment variables tekshirilmoqda...');
 console.log('   TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   PORT:', process.env.PORT || '3001 (default)');
 console.log('   HOST:', process.env.HOST || '0.0.0.0 (default)');
+
+// Barcha environment variables'ni ko'rsatish (debug uchun)
+console.log('\n📋 Barcha environment variables:');
+const allEnvVars = Object.keys(process.env).filter(key => 
+  key.includes('TELEGRAM') || 
+  key.includes('SUPABASE') || 
+  key.includes('PORT') || 
+  key.includes('HOST')
+);
+if (allEnvVars.length > 0) {
+  allEnvVars.forEach(key => {
+    const value = process.env[key];
+    const displayValue = value && value.length > 20 ? value.substring(0, 20) + '...' : value;
+    console.log(`   ${key} = ${displayValue || '(bo\'sh)'}`);
+  });
+} else {
+  console.log('   ❌ Hech qanday environment variable topilmadi!');
+}
 console.log('');
 
 const { app, PORT } = require('./server');
