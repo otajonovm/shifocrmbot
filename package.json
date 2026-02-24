@@ -1,0 +1,28 @@
+{
+  "name": "shifocrm-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for ShifoCRM notifications",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop shifocrm-telegram-bot",
+    "pm2:restart": "pm2 restart shifocrm-telegram-bot",
+    "pm2:delete": "pm2 delete shifocrm-telegram-bot",
+    "pm2:logs": "pm2 logs shifocrm-telegram-bot",
+    "pm2:status": "pm2 status",
+    "pm2:save": "pm2 save",
+    "pm2:startup": "pm2 startup"
+  },
+  "keywords": ["telegram", "bot", "shifocrm"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "@supabase/supabase-js": "^2.39.0"
+  }
+}
