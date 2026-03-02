@@ -32,7 +32,43 @@ BOT_API_KEY=your-secret-key  # ixtiyoriy, lekin production uchun tavsiya
 
 ## Database migratsiya
 
-Supabase SQL Editor'da `migrations/001_create_telegram_chat_ids.sql` faylini ishga tushiring.
+Supabase SQL Editor'da quyidagi fayllarni ketma-ketlikda ishga tushiring:
+1. `migrations/001_create_telegram_chat_ids.sql` - Telegram chat IDs jadvali
+2. `migrations/002_create_scheduled_messages.sql` - Rejalashtirilgan xabarlar jadvali (YA'NI!)
+
+## Avtomatik Rejalashtirilgan Xabarlar ✨
+
+Bu bot avtomatik ravishda bemorni yakunlash qilgandan keyin follow-up xabarlarini rejalashtirish qiladi.
+
+### Asosiy xususiyatlar:
+- 🤖 Avtomatik follow-up xabarlar
+- ⏱️ Rejalashtirilgan yuborish
+- 📊 Xabar statusini izlash
+- 🔄 Automatic retry (muvaffaqiyatsiz bo'lgan xabarlar uchun)
+
+### Tez Boshlash
+```bash
+# 1. Bemorni ro'yxatdan o'tkazish (Telegram'da)
+/register
+# Telefon raqam yuboring
+
+# 2. API orqali bemorni yakunlash
+curl -X POST http://localhost:3001/api/patients/complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "patient_123",
+    "patientName": "Bemor Ismi",
+    "phone": "+998901234567"
+  }'
+
+# 3. Automatic follow-up xabarlar yuboriladi:
+# - 24 soat keyin: Eslatma xabari
+# - 72 soat keyin: Tekshiruv xabari
+```
+
+**Batafsil ma'lumot:** [SCHEDULED_MESSAGES_API.md](SCHEDULED_MESSAGES_API.md)
+
+**Testing guide:** [TESTING_GUIDE.md](TESTING_GUIDE.md)
 
 ## Ishga tushirish
 

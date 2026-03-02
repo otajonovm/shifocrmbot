@@ -1,6 +1,8 @@
 const express = require('express');
 const bot = require('./bot');
 const { getTelegramChatId } = require('./repository/telegramChatRepo');
+const patientCompletionApi = require('./api/patientCompletionApi');
+const { startScheduler, stopScheduler } = require('./services/messageScheduler');
 
 const app = express();
 
@@ -58,7 +60,33 @@ app.post('/api/send', checkApiKey, async (req, res) => {
   }
 });
 
+// Patient completion API routes
+app.use('/api/patients', patientCompletionApi);
+
+// Scheduler holatini tekshirish
+app.get('/api/scheduler/status', (req, res) => {
+  const { isSchedulerRunning } = require('./services/messageScheduler');
+  res.json({
+    running: isSchedulerRunning(),
+    checkInterval: '30 seconds'
+  });
+});
+
 // Railway avtomatik PORT beradi, lekin default 3001
 const PORT = process.env.PORT || 3001;
+
+// Message scheduler ni ishga tushirish
+startScheduler();
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM signali olindi, message scheduler to\'xtatilyapti...');
+  stopScheduler();
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT signali olindi, message scheduler to\'xtatilyapti...');
+  stopScheduler();
+});
 
 module.exports = { app, PORT };

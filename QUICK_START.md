@@ -1,5 +1,32 @@
 # Tezkor Boshlash Yo'riqnomasi
 
+## ✨ YANGI: Avtomatik Rejalashtirilgan Xabarlar
+
+ShifoCRM bot endi **avtomatik follow-up xabarlarni** rejalashtirib yuboradi!
+
+### Tez Boshlash (5 daqiqa):
+
+1. **Database Migration** - Supabase'da `002_create_scheduled_messages.sql` ishga tushiring
+2. **Bot ishga tushirish** - `npm start` yoki PM2 orqali
+3. **Bemorni ro'yxatdan o'tkazish** - Telegram'da `/register` buyrug'i
+4. **Bemorni yakunlash** - API call yuboring
+
+```bash
+curl -X POST http://localhost:3001/api/patients/complete \
+  -H "Content-Type: application/json" \
+  -d '{"patientId":"pat_123","phone":"+998901234567"}'
+```
+
+✅ **Hammasi tayyor!** 24 va 72 soatdan keyin avtomatik xabarlar yuboriladi.
+
+### Batafsil ma'lumot:
+- 📚 [SCHEDULED_MESSAGES_API.md](SCHEDULED_MESSAGES_API.md) - API dokumentatsiyasi
+- 🧪 [TESTING_GUIDE.md](TESTING_GUIDE.md) - Testing qo'llanmasi
+- 📋 [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - Texnik detallar
+- 📊 [FINAL_REPORT.md](FINAL_REPORT.md) - To'liq xabar
+
+---
+
 ## Botni ishga tushirish
 
 ### 1. PM2 orqali (Tavsiya etiladi - doimiy ishlab turishi uchun)
