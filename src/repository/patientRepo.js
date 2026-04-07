@@ -52,27 +52,16 @@ async function getPatientById(patientId) {
 }
 
 /**
- * Telefon bo'yicha patient ni topadi
- * @param {string} phone
- * @returns {Promise<Object|null>} Patient ma'lumotlari yoki null
+ * Berilgan jadvaldan telefon raqam orqali qidirish (8 xil variant bilan)
  */
-async function getPatientByPhone(phone) {
-  if (!phone) {
-    console.log('getPatientByPhone: phone bo\'sh');
-    return null;
-  }
-  
-  console.log(`🔍 Telefon raqam qidirilmoqda: "${phone}"`);
-  
-  // Telefon raqamni normalize qilish (+998901234567 formatida)
-  const normalizedPhone = phone.replace(/[^\d+]/g, '');
-  console.log(`📞 Normalize qilingan: "${normalizedPhone}"`);
+async function searchPhoneInTable(tableName, phone, normalizedPhone, digitsOnly) {
+  console.log(`\n=== 🔎 QIDIRUV JADVALI: ${tableName.toUpperCase()} ===`);
   
   // Avval to'g'ridan-to'g'ri qidirish
   console.log(`1️⃣ To'g'ridan-to'g'ri qidirish: "${normalizedPhone}"`);
   let { data, error } = await supabase
-    .from('patients')
-    .select('id, full_name, phone')
+    .from(tableName)
+    .select('*')
     .eq('phone', normalizedPhone)
     .limit(1);
   
@@ -80,8 +69,9 @@ async function getPatientByPhone(phone) {
     console.log(`❌ Xatolik (1):`, error.message);
   } else if (data && data.length > 0) {
     const found = data[0];
-    console.log(`✅ Topildi (1):`, found.id, found.full_name, found.phone);
-    return found;
+    found.full_name = found.full_name || found.name; // 'leads' dagi name ni full_name ga moslash ehtimoli
+    console.log(`✅ Topildi (1) [${tableName}]:`, found.id, found.full_name, found.phone);
+    return { ...found, _table: tableName };
   } else {
     console.log(`❌ Topilmadi (1)`);
   }
@@ -91,8 +81,8 @@ async function getPatientByPhone(phone) {
     const withPlus = `+998${normalizedPhone.replace(/^998/, '')}`;
     console.log(`2️⃣ +998 qo'shib qidirish: "${withPlus}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .eq('phone', withPlus)
       .limit(1));
     
@@ -100,8 +90,9 @@ async function getPatientByPhone(phone) {
       console.log(`❌ Xatolik (2):`, error.message);
     } else if (data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (2):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (2) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     } else {
       console.log(`❌ Topilmadi (2)`);
     }
@@ -112,8 +103,8 @@ async function getPatientByPhone(phone) {
     const withoutPlus = normalizedPhone.replace(/^\+998/, '998');
     console.log(`3️⃣ +siz qidirish: "${withoutPlus}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .eq('phone', withoutPlus)
       .limit(1));
     
@@ -121,99 +112,129 @@ async function getPatientByPhone(phone) {
       console.log(`❌ Xatolik (3):`, error.message);
     } else if (data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (3):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (3) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     } else {
       console.log(`❌ Topilmadi (3)`);
     }
   }
-  
-  // Qo'shimcha variantlar: faqat raqamlar
-  const digitsOnly = normalizedPhone.replace(/[^\d]/g, '');
-  console.log(`📱 Faqat raqamlar: "${digitsOnly}"`);
   
   if (digitsOnly.length >= 9) {
     // Variant 4: 998940542722 formatida (998 + 9 raqam)
     const with998 = digitsOnly.startsWith('998') ? digitsOnly : `998${digitsOnly}`;
     console.log(`4️⃣ 998 bilan qidirish: "${with998}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .eq('phone', with998)
       .limit(1));
     
     if (!error && data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (4):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (4) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     }
     
     // Variant 5: +998940542722 formatida
     const withPlus998 = `+${with998}`;
     console.log(`5️⃣ +998 bilan qidirish: "${withPlus998}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .eq('phone', withPlus998)
       .limit(1));
     
     if (!error && data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (5):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (5) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     }
     
     // Variant 6: Faqat oxirgi 9 raqam (940542722)
-    // Agar 998 bilan boshlansa, uni olib tashlash
-    const last9Digits = digitsOnly.length >= 9 
-      ? digitsOnly.slice(-9) 
-      : digitsOnly;
+    const last9Digits = digitsOnly.length >= 9 ? digitsOnly.slice(-9) : digitsOnly;
     console.log(`6️⃣ Faqat oxirgi 9 raqam: "${last9Digits}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .eq('phone', last9Digits)
       .limit(1));
     
     if (!error && data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (6):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (6) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     }
     
     // Variant 7: LIKE bilan qidirish (oxirgi 9 raqam bilan)
     console.log(`7️⃣ LIKE bilan qidirish (oxirgi 9 raqam): "${last9Digits}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .like('phone', `%${last9Digits}`)
       .limit(1));
     
     if (!error && data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (7 - LIKE):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (7 - LIKE) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     }
     
     // Variant 8: ILIKE bilan qidirish (case-insensitive)
     console.log(`8️⃣ ILIKE bilan qidirish: "%${last9Digits}"`);
     ({ data, error } = await supabase
-      .from('patients')
-      .select('id, full_name, phone')
+      .from(tableName)
+      .select('*')
       .ilike('phone', `%${last9Digits}%`)
       .limit(1));
     
     if (!error && data && data.length > 0) {
       const found = data[0];
-      console.log(`✅ Topildi (8 - ILIKE):`, found.id, found.full_name, found.phone);
-      return found;
+      found.full_name = found.full_name || found.name;
+      console.log(`✅ Topildi (8 - ILIKE) [${tableName}]:`, found.id, found.full_name, found.phone);
+      return { ...found, _table: tableName };
     }
   }
   
-  console.log(`❌ Hech qanday variant bilan topilmadi`);
+  return null;
+}
+
+/**
+ * Telefon bo'yicha patient (yoki lead) ni topadi
+ * @param {string} phone
+ * @returns {Promise<Object|null>} Patient yoki Lead ma'lumotlari yoki null
+ */
+async function getPatientByPhone(phone) {
+  if (!phone) {
+    console.log('getPatientByPhone: phone bo\'sh');
+    return null;
+  }
+  
+  console.log(`🔍 Telefon raqam qidirilmoqda (Patients va Leads): "${phone}"`);
+  
+  // Telefon raqamni normalize qilish (+998901234567 formatida)
+  const normalizedPhone = phone.replace(/[^\d+]/g, '');
+  const digitsOnly = normalizedPhone.replace(/[^\d]/g, '');
+  
+  // 1. Avval 'patients' jadvalidan qidirish
+  let found = await searchPhoneInTable('patients', phone, normalizedPhone, digitsOnly);
+  
+  // 2. Agar patients'dan topilmasa, 'leads' jadvalidan qidirish
+  if (!found) {
+    found = await searchPhoneInTable('leads', phone, normalizedPhone, digitsOnly);
+  }
+  
+  if (found) {
+    return found;
+  }
+  
+  console.log(`❌ Hech qanday jadvaldan topilmadi (patients, leads)`);
   console.log(`💡 Qidirilgan raqam: "${phone}"`);
   console.log(`💡 Normalize qilingan: "${normalizedPhone}"`);
-  console.log(`💡 Faqat raqamlar: "${digitsOnly}"`);
   return null;
 }
 

@@ -96,16 +96,17 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
     clearUserState(chatId);
     await bot.sendMessage(
       chatId,
-      '❌ Bu telefon raqam ShifoCRM tizimida topilmadi.\n\n' +
+      '❌ Bu telefon raqam ShifoCRM tizimida (bemorlar yoki leadlar orasida) topilmadi.\n\n' +
       'Iltimos, to\'g\'ri telefon raqamingizni kiriting yoki administrator bilan bog\'laning.',
       { reply_markup: { remove_keyboard: true } }
     );
     return;
   }
 
-  // Patient topildi, saqlash
+  // Patient/Lead topildi, saqlash
   try {
     const patientId = String(patient.id);
+    const isLead = patient._table === 'leads';
     console.log(`📝 Patient topildi, saqlash boshlandi:`, {
       patientId,
       chatId: String(chatId),
@@ -123,11 +124,13 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
 
     if (saved) {
       clearUserState(chatId);
-      const patientName = patient.full_name || 'Bemor';
+      const patientName = patient.full_name || 'Mijoz';
+      const roleName = isLead ? 'Potensial mijoz (Lead)' : 'Bemor';
       await bot.sendMessage(
         chatId,
         `✅ Ro'yxatdan o'tgansiz, ${patientName}!\n\n` +
-        `Patient ID: ${patientId}\n` +
+        `Holat: ${roleName}\n` +
+        `ID: ${patientId}\n` +
         `Telefon: ${phone}\n\n` +
         `Endi sizga qabul eslatmalari va xabarlar yuboriladi.`,
         { reply_markup: { remove_keyboard: true } }
@@ -166,7 +169,6 @@ bot.on('message', async (msg) => {
     if (text && text.startsWith('/')) {
       return;
     }
-
     // Kontakt yuborilgan bo'lsa
     if (contact && contact.phone_number) {
       if (contact.user_id && msg.from?.id && contact.user_id !== msg.from.id) {
@@ -197,11 +199,14 @@ bot.on('message', async (msg) => {
     const patient = await getPatientByPhone(phone);
     
     if (patient) {
+      const isLead = patient._table === 'leads';
+      const roleName = isLead ? 'Potensial mijoz (Lead)' : 'Bemor';
       await bot.sendMessage(
         chatId,
         `✅ Bu telefon raqam ShifoCRM tizimida mavjud.\n\n` +
-        `Bemor: ${patient.full_name || 'Noma\'lum'}\n` +
-        `Patient ID: ${patient.id}\n\n` +
+        `Mijoz: ${patient.full_name || 'Noma\'lum'}\n` +
+        `Holat: ${roleName}\n` +
+        `ID: ${patient.id}\n\n` +
         `Ro'yxatdan o'tish uchun /register buyrug'ini yuboring.`
       );
     } else {
