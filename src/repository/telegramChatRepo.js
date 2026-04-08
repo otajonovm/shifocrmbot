@@ -29,7 +29,7 @@ async function getTelegramChatId(patientId) {
 /**
  * Telefon bo'yicha chat_id ni topadi
  * @param {string} phone
- * @returns {Promise<{patient_id: string, chat_id: string, phone?: string}|null>} chat info yoki null
+ * @returns {Promise<{patient_id: string, chat_id: string, phone?: string, locale?: string}|null>} chat info yoki null
  */
 async function getTelegramChatIdByPhone(phone) {
   if (!phone) {
@@ -37,7 +37,7 @@ async function getTelegramChatIdByPhone(phone) {
   }
   const { data, error } = await supabase
     .from('telegram_chat_ids')
-    .select('patient_id, chat_id, phone')
+    .select('patient_id, chat_id, phone, locale')
     .eq('phone', phone)
     .maybeSingle();
   if (error || !data) {
@@ -47,6 +47,7 @@ async function getTelegramChatIdByPhone(phone) {
     patient_id: String(data.patient_id),
     chat_id: String(data.chat_id),
     phone: data.phone ? String(data.phone) : null,
+    locale: data.locale ? String(data.locale) : 'uz',
   };
 }
 
@@ -58,9 +59,10 @@ async function getTelegramChatIdByPhone(phone) {
  * @param {string} [params.username]
  * @param {string} [params.firstName]
  * @param {string} [params.phone]
+ * @param {'uz'|'ru'} [params.locale]
  * @returns {Promise<boolean>}
  */
-async function saveTelegramChatId({ patientId, chatId, username, firstName, phone }) {
+async function saveTelegramChatId({ patientId, chatId, username, firstName, phone, locale }) {
   if (!patientId || !chatId) {
     console.error('saveTelegramChatId: patientId yoki chatId bo\'sh');
     return false;
@@ -72,6 +74,7 @@ async function saveTelegramChatId({ patientId, chatId, username, firstName, phon
   console.log('   username:', username);
   console.log('   first_name:', firstName);
   console.log('   phone:', phone);
+  console.log('   locale:', locale || 'uz');
   
   try {
     // Avval: chat_id allaqachon boshqa patient_id bilan mavjud bo'lsa, uni o'chirish
@@ -109,6 +112,7 @@ async function saveTelegramChatId({ patientId, chatId, username, firstName, phon
           username: username || null,
           first_name: firstName || null,
           phone: phone || null,
+          locale: locale === 'ru' ? 'ru' : 'uz',
           updated_at: new Date().toISOString(),
         },
         {

@@ -8,22 +8,62 @@ const router = express.Router();
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const bot = botToken ? new TelegramBot(botToken, { polling: false }) : null;
 
-// Default follow-up messages (oxirida o'zgartirilishi mumkin)
-const DEFAULT_FOLLOW_UP_MESSAGES = [
-  {
-    delayHours: 24,
-    text: `<b>📋 Bemor yakunlash sondan keyin eslatma</b>\n\n` +
-          `Sizning tibbiy ko'rik yakunlandi.\n\n` +
-          `Agar sizda savollar yoki muammolar bo'lsa, iltimos biz bilan bog'laning.\n\n` +
-          `Sizning sog'lig'ingiz bizga muhim! 💚`
-  },
-  {
-    delayHours: 72, // 3 kun keyin
-    text: `<b>⚕️ Yo'lni davom etishing haqida</b>\n\n` +
-          `Sizning umumiy holatiz qandaydir?\n\n` +
-          `Agar tavsiyalarni amal qilishda qiyinchilik bo'lsa, biz yordam bera olamiz.`
+const DEFAULT_FOLLOW_UP_MESSAGES = {
+  uz: [
+    {
+      delayHours: 24,
+      text: `<b>📋 Yakuniy ko'rikdan keyingi eslatma</b>\n\n` +
+            `Sizning ko'rigingiz yakunlandi.\n\n` +
+            `Agar savol yoki muammo bo'lsa, biz bilan bog'laning.\n\n` +
+            `Sog'lig'ingiz biz uchun muhim! 💚`
+    },
+    {
+      delayHours: 72,
+      text: `<b>⚕️ Holatingiz qanday?</b>\n\n` +
+            `O'zingizni qanday his qilyapsiz?\n\n` +
+            `Tavsiyalar bo'yicha savol bo'lsa, sizga yordam beramiz.`
+    }
+  ],
+  ru: [
+    {
+      delayHours: 24,
+      text: `<b>📋 Напоминание после завершения приёма</b>\n\n` +
+            `Ваш приём завершён.\n\n` +
+            `Если у вас есть вопросы или дискомфорт — свяжитесь с нами.\n\n` +
+            `Ваше здоровье важно для нас! 💚`
+    },
+    {
+      delayHours: 72,
+      text: `<b>⚕️ Как ваше самочувствие?</b>\n\n` +
+            `Как вы себя чувствуете после приёма?\n\n` +
+            `Если есть вопросы по рекомендациям — мы поможем.`
+    }
+  ]
+};
+
+function getLocale(locale) {
+  return locale === 'ru' ? 'ru' : 'uz';
+}
+
+function getDefaultFollowUps(locale) {
+  const normalizedLocale = getLocale(locale);
+  return DEFAULT_FOLLOW_UP_MESSAGES[normalizedLocale];
+}
+
+function getCompletionMessage(locale) {
+  const normalizedLocale = getLocale(locale);
+  if (normalizedLocale === 'ru') {
+    return `<b>✅ Завершение подтверждено</b>\n\n` +
+      `Ваш медицинский приём завершён!\n\n` +
+      `Скоро вам будут отправлены follow-up сообщения.\n\n` +
+      `Желаем вам крепкого здоровья! 🙏`;
   }
-];
+
+  return `<b>✅ Yakunlash tasdiqlandi</b>\n\n` +
+    `Sizning tibbiy ko'rigingiz yakunlandi!\n\n` +
+    `Tez orada sizga follow-up eslatmalari yuboriladi.\n\n` +
+    `Sog'lig'ingiz uchun tilaklarimiz! 🙏`;
+}
 
 /**
  * POST /api/patients/complete
@@ -71,9 +111,10 @@ router.post('/complete', async (req, res) => {
     }
 
     // Follow-up xabarlarni rejalashtirish
+    const locale = getLocale(chatInfo.locale);
     const messagesToSchedule = Array.isArray(customMessages) && customMessages.length > 0
       ? customMessages
-      : DEFAULT_FOLLOW_UP_MESSAGES;
+      : getDefaultFollowUps(locale);
 
     const scheduledMessages = await scheduleFollowUpMessages({
       patientId: resolvedPatientId,
@@ -85,10 +126,7 @@ router.post('/complete', async (req, res) => {
     // Darhol Telegram'da xabar yuborish
     if (bot) {
       try {
-        const welcomeMessage = `<b>✅ Yakunlash tasdiqlandi</b>\n\n` +
-          `Sizning tibbiy ko'rik yakunlandi!\n\n` +
-          `Tez orada sizga follow-up eslatmalari yuboriladi.\n\n` +
-          `Sog'lig'ingiz uchun tilaklarimiz! 🙏`;
+        const welcomeMessage = getCompletionMessage(locale);
 
         await bot.sendMessage(chatInfo.chat_id, welcomeMessage, {
           parse_mode: 'HTML'
