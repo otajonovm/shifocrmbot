@@ -41,7 +41,7 @@ router.post('/complete', async (req, res) => {
     }
 
     // Bemor ma'lumotini Telegram chat ID bilan topish
-    let chatInfo = await getTelegramChatIdByPhone(phone);
+    const chatInfo = await getTelegramChatIdByPhone(phone);
 
     if (!chatInfo) {
       return res.status(404).json({
@@ -50,9 +50,13 @@ router.post('/complete', async (req, res) => {
       });
     }
 
+    // patientId request'da berilgan bo'lsa undan foydalanamiz,
+    // aks holda telegram_chat_ids dagi patient_id ni olamiz.
+    const resolvedPatientId = String(patientId || chatInfo.patient_id);
+
     // Bemor yakunlashni saqlash
     const completion = await recordPatientCompletion({
-      patientId: String(chatInfo.patient_id),
+      patientId: resolvedPatientId,
       chatId: String(chatInfo.chat_id),
       patientName: patientName || 'Bemor',
       phone: phone,
@@ -67,9 +71,12 @@ router.post('/complete', async (req, res) => {
     }
 
     // Follow-up xabarlarni rejalashtirish
-    const messagesToSchedule = customMessages || DEFAULT_FOLLOW_UP_MESSAGES;
+    const messagesToSchedule = Array.isArray(customMessages) && customMessages.length > 0
+      ? customMessages
+      : DEFAULT_FOLLOW_UP_MESSAGES;
+
     const scheduledMessages = await scheduleFollowUpMessages({
-      patientId: String(chatInfo.patient_id),
+      patientId: resolvedPatientId,
       patientName: patientName || 'Bemor',
       phone: phone,
       messages: messagesToSchedule

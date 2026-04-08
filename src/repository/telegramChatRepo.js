@@ -29,7 +29,7 @@ async function getTelegramChatId(patientId) {
 /**
  * Telefon bo'yicha chat_id ni topadi
  * @param {string} phone
- * @returns {Promise<string|null>} chat_id yoki null
+ * @returns {Promise<{patient_id: string, chat_id: string, phone?: string}|null>} chat info yoki null
  */
 async function getTelegramChatIdByPhone(phone) {
   if (!phone) {
@@ -37,13 +37,17 @@ async function getTelegramChatIdByPhone(phone) {
   }
   const { data, error } = await supabase
     .from('telegram_chat_ids')
-    .select('chat_id')
+    .select('patient_id, chat_id, phone')
     .eq('phone', phone)
     .maybeSingle();
   if (error || !data) {
     return null;
   }
-  return String(data.chat_id);
+  return {
+    patient_id: String(data.patient_id),
+    chat_id: String(data.chat_id),
+    phone: data.phone ? String(data.phone) : null,
+  };
 }
 
 /**
