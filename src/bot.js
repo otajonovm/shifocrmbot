@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
-const { saveTelegramChatId } = require('./repository/telegramChatRepo');
+const { saveTelegramChatId, getLocaleByChatId } = require('./repository/telegramChatRepo');
 const { getPatientByPhone } = require('./repository/patientRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -175,6 +175,20 @@ function getUserLocale(chatId) {
   return userLocales[chatId] || 'uz';
 }
 
+async function ensureUserLocale(chatId) {
+  if (hasUserLocale(chatId)) {
+    return getUserLocale(chatId);
+  }
+
+  const persistedLocale = await getLocaleByChatId(chatId);
+  if (persistedLocale) {
+    setUserLocale(chatId, persistedLocale);
+    return persistedLocale;
+  }
+
+  return null;
+}
+
 function t(chatId, key, params) {
   const locale = getUserLocale(chatId);
   const dict = messages[locale] || messages.uz;
@@ -218,6 +232,13 @@ async function startRegister(chatId) {
 // /start
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
+
+  const existingLocale = await ensureUserLocale(chatId);
+  if (existingLocale) {
+    await sendStartWelcome(chatId);
+    return;
+  }
+
   setUserState(chatId, { step: 'waiting_language', pendingCommand: 'start' });
   await sendLanguagePicker(chatId, getUserLocale(chatId));
 });
@@ -225,6 +246,7 @@ bot.onText(/\/start/, async (msg) => {
 // /help
 bot.onText(/\/help/, async (msg) => {
   const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
   if (!hasUserLocale(chatId)) {
     setUserState(chatId, { step: 'waiting_language', pendingCommand: 'help' });
     await sendLanguagePicker(chatId, 'uz');
@@ -236,6 +258,7 @@ bot.onText(/\/help/, async (msg) => {
 // /register
 bot.onText(/\/register/, async (msg) => {
   const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
   if (!hasUserLocale(chatId)) {
     setUserState(chatId, { step: 'waiting_language', pendingCommand: 'register' });
     await sendLanguagePicker(chatId, 'uz');
@@ -316,6 +339,8 @@ bot.on('message', async (msg) => {
   const text = msg.text;
   const contact = msg.contact;
   const state = getUserState(chatId);
+
+  await ensureUserLocale(chatId);
 
   if (state && state.step === 'waiting_language') {
     if (text === LANG_UZ || text === LANG_RU) {

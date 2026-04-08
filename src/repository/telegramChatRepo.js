@@ -1,5 +1,39 @@
 const supabase = require('../supabase');
 
+function buildPhoneCandidates(phone) {
+  if (!phone || typeof phone !== 'string') {
+    return [];
+  }
+
+  const cleaned = phone.replace(/[^\d+]/g, '');
+  const digitsOnly = cleaned.replace(/[^\d]/g, '');
+  const candidates = new Set();
+
+  if (cleaned) {
+    candidates.add(cleaned);
+  }
+
+  if (digitsOnly) {
+    candidates.add(digitsOnly);
+  }
+
+  if (digitsOnly.length >= 9) {
+    const last9 = digitsOnly.slice(-9);
+    candidates.add(last9);
+
+    const with998 = digitsOnly.startsWith('998') ? digitsOnly : `998${last9}`;
+    candidates.add(with998);
+    candidates.add(`+${with998}`);
+  }
+
+  if (!cleaned.startsWith('+') && digitsOnly) {
+    const plus998 = `+998${digitsOnly.replace(/^998/, '')}`;
+    candidates.add(plus998);
+  }
+
+  return Array.from(candidates).filter(Boolean);
+}
+
 /**
  * Patient ID bo'yicha Telegram chat_id ni topadi
  * @param {string} patientId
@@ -35,20 +69,66 @@ async function getTelegramChatIdByPhone(phone) {
   if (!phone) {
     return null;
   }
-  const { data, error } = await supabase
-    .from('telegram_chat_ids')
-    .select('patient_id, chat_id, phone, locale')
-    .eq('phone', phone)
-    .maybeSingle();
-  if (error || !data) {
+
+  const candidates = buildPhoneCandidates(phone);
+
+  for (const candidate of candidates) {
+    const { data, error } = await supabase
+      .from('telegram_chat_ids')
+      .select('patient_id, chat_id, phone, locale')
+      .eq('phone', candidate)
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        patient_id: String(data.patient_id),
+        chat_id: String(data.chat_id),
+        phone: data.phone ? String(data.phone) : null,
+        locale: data.locale ? String(data.locale) : 'uz',
+      };
+    }
+  }
+
+  if (candidates.length > 0) {
+    const last9 = candidates.find(item => /^\d{9}$/.test(item));
+    if (last9) {
+      const { data, error } = await supabase
+        .from('telegram_chat_ids')
+        .select('patient_id, chat_id, phone, locale')
+        .ilike('phone', `%${last9}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        return {
+          patient_id: String(data.patient_id),
+          chat_id: String(data.chat_id),
+          phone: data.phone ? String(data.phone) : null,
+          locale: data.locale ? String(data.locale) : 'uz',
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function getLocaleByChatId(chatId) {
+  if (!chatId) {
     return null;
   }
-  return {
-    patient_id: String(data.patient_id),
-    chat_id: String(data.chat_id),
-    phone: data.phone ? String(data.phone) : null,
-    locale: data.locale ? String(data.locale) : 'uz',
-  };
+
+  const { data, error } = await supabase
+    .from('telegram_chat_ids')
+    .select('locale')
+    .eq('chat_id', String(chatId))
+    .maybeSingle();
+
+  if (error || !data || !data.locale) {
+    return null;
+  }
+
+  return data.locale === 'ru' ? 'ru' : 'uz';
 }
 
 /**
@@ -139,5 +219,6 @@ async function saveTelegramChatId({ patientId, chatId, username, firstName, phon
 module.exports = {
   getTelegramChatId,
   getTelegramChatIdByPhone,
+  getLocaleByChatId,
   saveTelegramChatId,
 };
