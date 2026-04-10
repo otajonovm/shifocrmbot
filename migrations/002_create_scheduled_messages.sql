@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS patient_completions (
   completion_date TIMESTAMPTZ DEFAULT NOW(),
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   FOREIGN KEY (patient_id) REFERENCES telegram_chat_ids(patient_id) ON DELETE CASCADE
 );
 

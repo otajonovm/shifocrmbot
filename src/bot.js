@@ -4,6 +4,9 @@ const { saveTelegramChatId, getLocaleByChatId } = require('./repository/telegram
 const { getPatientByPhone } = require('./repository/patientRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const pollingEnabled = process.env.TELEGRAM_POLLING_ENABLED !== 'false';
+const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER === 'true';
+const pollingRecoverDelayMs = Number(process.env.TELEGRAM_POLLING_RECOVER_DELAY_MS || 30000);
 
 if (!botToken) {
   console.error('❌ TELEGRAM_BOT_TOKEN topilmadi!');
@@ -12,7 +15,14 @@ if (!botToken) {
   throw new Error('TELEGRAM_BOT_TOKEN .env faylda ko\'rsatilgan bo\'lishi kerak');
 }
 
-const bot = new TelegramBot(botToken, { polling: true });
+const bot = new TelegramBot(botToken, { polling: pollingEnabled });
+
+if (!pollingEnabled) {
+  console.log('ℹ️ Telegram polling o\'chirilgan (TELEGRAM_POLLING_ENABLED=false)');
+}
+
+let pollingConflictLock = false;
+let pollingRecoverTimer = null;
 
 const LANG_UZ = "🇺🇿 O'zbekcha";
 const LANG_RU = '🇷🇺 Русский';
@@ -332,6 +342,50 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
     );
   }
 }
+
+bot.on('polling_error', async (error) => {
+  const errorText = String(error?.message || error || '');
+  const isConflict = errorText.includes('409') || errorText.toLowerCase().includes('conflict');
+
+  if (!isConflict) {
+    console.error('❌ Telegram polling xatoligi:', errorText);
+    return;
+  }
+
+  if (pollingConflictLock) {
+    return;
+  }
+
+  pollingConflictLock = true;
+  console.error('❌ Telegram polling 409 Conflict: bir vaqtning o\'zida bir nechta instance ishlayapti.');
+
+  try {
+    await bot.stopPolling();
+    console.warn('🛑 Polling vaqtincha to\'xtatildi.');
+  } catch (stopError) {
+    console.error('❌ Pollingni to\'xtatishda xatolik:', stopError?.message || stopError);
+  }
+
+  if (!pollingAutoRecover || !pollingEnabled) {
+    console.warn('ℹ️ Auto-recover o\'chiq. Faqat bitta polling instance qoldiring.');
+    return;
+  }
+
+  if (pollingRecoverTimer) {
+    clearTimeout(pollingRecoverTimer);
+  }
+
+  pollingRecoverTimer = setTimeout(async () => {
+    try {
+      console.log(`🔁 Polling qayta ishga tushirilmoqda (${pollingRecoverDelayMs}ms dan keyin)...`);
+      await bot.startPolling();
+      pollingConflictLock = false;
+      console.log('✅ Polling qayta ishga tushdi.');
+    } catch (restartError) {
+      console.error('❌ Pollingni qayta ishga tushirishda xatolik:', restartError?.message || restartError);
+    }
+  }, pollingRecoverDelayMs);
+});
 
 // Matn xabarlarini qayta ishlash (telefon raqam tekshirish)
 bot.on('message', async (msg) => {

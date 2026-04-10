@@ -1,5 +1,19 @@
 const supabase = require('../supabase');
 
+function isScheduledMessagesTableMissingError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+
+  return (
+    message.includes('scheduled_messages') &&
+    (message.includes('could not find the table') || message.includes('does not exist'))
+  ) || (
+    details.includes('scheduled_messages') &&
+    (details.includes('could not find the table') || details.includes('does not exist'))
+  ) || code === 'PGRST205';
+}
+
 /**
  * Rejalashtirilgan xabar yaratish
  * @param {Object} params
@@ -73,12 +87,23 @@ async function getPendingMessages() {
       .order('scheduled_time', { ascending: true });
 
     if (error) {
+      if (isScheduledMessagesTableMissingError(error)) {
+        const missingTableError = new Error('SCHEDULED_MESSAGES_TABLE_MISSING');
+        missingTableError.code = 'SCHEDULED_MESSAGES_TABLE_MISSING';
+        missingTableError.details = error.message || error.details || null;
+        throw missingTableError;
+      }
+
       console.error('❌ Pending xabarlarni olishda xatolik:', error.message);
       return [];
     }
 
     return data || [];
   } catch (err) {
+    if (err?.code === 'SCHEDULED_MESSAGES_TABLE_MISSING') {
+      throw err;
+    }
+
     console.error('❌ Exception pending xabarlarni olishda:', err);
     return [];
   }

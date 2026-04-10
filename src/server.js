@@ -65,10 +65,11 @@ app.use('/api/patients', patientCompletionApi);
 
 // Scheduler holatini tekshirish
 app.get('/api/scheduler/status', (req, res) => {
-  const { isSchedulerRunning } = require('./services/messageScheduler');
+  const { isSchedulerRunning, getSchedulerDisabledReason } = require('./services/messageScheduler');
   res.json({
     running: isSchedulerRunning(),
-    checkInterval: '30 seconds'
+    checkInterval: '30 seconds',
+    disabledReason: getSchedulerDisabledReason()
   });
 });
 

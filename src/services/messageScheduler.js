@@ -13,6 +13,8 @@ const schedulerBot = new TelegramBot(botToken, { polling: false });
 // Xabarlarni yuborish uchun interval (har 30 soniyada tekshirish)
 const CHECK_INTERVAL = 30 * 1000; // 30 sekund
 let schedulerInterval = null;
+let schedulerDisabledReason = null;
+let missingTableWarningShown = false;
 
 /**
  * Pending xabarlarni tekshirish va yuborish
@@ -54,6 +56,25 @@ async function checkAndSendPendingMessages() {
       }
     }
   } catch (err) {
+    if (err?.code === 'SCHEDULED_MESSAGES_TABLE_MISSING') {
+      schedulerDisabledReason = 'SCHEDULED_MESSAGES_TABLE_MISSING';
+
+      if (schedulerInterval) {
+        clearInterval(schedulerInterval);
+        schedulerInterval = null;
+      }
+
+      if (!missingTableWarningShown) {
+        missingTableWarningShown = true;
+        console.error('❌ scheduled_messages jadvali topilmadi, scheduler to\'xtatildi.');
+        console.error('   Yechim: migrations/002_create_scheduled_messages.sql ni DB ga qo\'llang.');
+        if (err?.details) {
+          console.error('   DB xabari:', err.details);
+        }
+      }
+      return;
+    }
+
     console.error('❌ Pending xabarlarni tekshirishda xatolik:', err);
   }
 }
@@ -62,6 +83,11 @@ async function checkAndSendPendingMessages() {
  * Message scheduler ni boshlash
  */
 function startScheduler() {
+  if (schedulerDisabledReason === 'SCHEDULED_MESSAGES_TABLE_MISSING') {
+    console.warn('⚠️ Message scheduler ishga tushmadi: scheduled_messages jadvali yo\'q');
+    return;
+  }
+
   if (schedulerInterval) {
     console.warn('⚠️ Message scheduler allaqachon ishga tushgan');
     return;
@@ -95,9 +121,14 @@ function isSchedulerRunning() {
   return schedulerInterval !== null;
 }
 
+function getSchedulerDisabledReason() {
+  return schedulerDisabledReason;
+}
+
 module.exports = {
   startScheduler,
   stopScheduler,
   isSchedulerRunning,
+  getSchedulerDisabledReason,
   checkAndSendPendingMessages
 };
