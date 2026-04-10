@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
-const { saveTelegramChatId, getLocaleByChatId } = require('./repository/telegramChatRepo');
+const { saveTelegramChatId, getLocaleByChatId, updateLocaleByChatId } = require('./repository/telegramChatRepo');
 const { getPatientByPhone } = require('./repository/patientRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -43,6 +43,7 @@ const messages = {
     help:
       `📋 Bot buyruqlari:\n\n` +
       `/start - Botni boshlash\n` +
+      `/language - Tilni o'zgartirish\n` +
       `/register - Ro'yxatdan o'tish (telefon raqam)\n` +
       `/help - Yordam\n\n` +
       `Telefon raqamingizni yuborsangiz, ShifoCRM tizimida tekshiriladi.\n` +
@@ -100,6 +101,7 @@ const messages = {
     help:
       `📋 Команды бота:\n\n` +
       `/start - Начать работу с ботом\n` +
+      `/language - Сменить язык\n` +
       `/register - Регистрация (номер телефона)\n` +
       `/help - Помощь\n\n` +
       `Если отправите номер телефона, он будет проверен в системе ShifoCRM.\n` +
@@ -209,6 +211,36 @@ function t(chatId, key, params) {
   return formatMessage(value, params);
 }
 
+function parseSelectedLocale(text) {
+  const normalized = String(text || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    normalized === LANG_RU.toLowerCase() ||
+    normalized.includes('рус') ||
+    normalized === 'ru' ||
+    normalized === 'russian'
+  ) {
+    return 'ru';
+  }
+
+  if (
+    normalized === LANG_UZ.toLowerCase() ||
+    normalized.includes('o\'zbek') ||
+    normalized.includes('uzbek') ||
+    normalized.includes('ўзбек') ||
+    normalized === 'uz' ||
+    normalized === 'uzbek'
+  ) {
+    return 'uz';
+  }
+
+  return null;
+}
+
 async function sendLanguagePicker(chatId, localeMaybe = 'uz') {
   const locale = localeMaybe === 'ru' ? 'ru' : 'uz';
   await bot.sendMessage(chatId, messages[locale].languageAsk, {
@@ -275,6 +307,13 @@ bot.onText(/\/register/, async (msg) => {
     return;
   }
   await startRegister(chatId);
+});
+
+// /language
+bot.onText(/\/language/, async (msg) => {
+  const chatId = msg.chat.id;
+  setUserState(chatId, { step: 'waiting_language', pendingCommand: 'language' });
+  await sendLanguagePicker(chatId, getUserLocale(chatId));
 });
 
 async function registerUserByPhone({ chatId, phoneRaw, msg }) {
@@ -397,9 +436,15 @@ bot.on('message', async (msg) => {
   await ensureUserLocale(chatId);
 
   if (state && state.step === 'waiting_language') {
-    if (text === LANG_UZ || text === LANG_RU) {
-      const selectedLocale = text === LANG_RU ? 'ru' : 'uz';
+    const selectedLocale = parseSelectedLocale(text);
+    if (selectedLocale) {
       setUserLocale(chatId, selectedLocale);
+
+      try {
+        await updateLocaleByChatId(chatId, selectedLocale);
+      } catch (persistLocaleError) {
+        console.warn('⚠️ Locale saqlashda ogohlantirish:', persistLocaleError?.message || persistLocaleError);
+      }
 
       const pendingCommand = state.pendingCommand;
       clearUserState(chatId);
@@ -412,6 +457,8 @@ bot.on('message', async (msg) => {
         await sendHelp(chatId);
       } else if (pendingCommand === 'register') {
         await startRegister(chatId);
+      } else if (pendingCommand === 'language') {
+        await sendStartWelcome(chatId);
       } else {
         await sendStartWelcome(chatId);
       }
@@ -427,6 +474,12 @@ bot.on('message', async (msg) => {
     if (text === '/register') {
       setUserState(chatId, { step: 'waiting_language', pendingCommand: 'register' });
       await sendLanguagePicker(chatId, 'uz');
+      return;
+    }
+
+    if (text === '/language') {
+      setUserState(chatId, { step: 'waiting_language', pendingCommand: 'language' });
+      await sendLanguagePicker(chatId, getUserLocale(chatId));
       return;
     }
 

@@ -1,7 +1,4 @@
-/**
- * ShifoCRM uchun Telegram API client misoli
- * Bu faylni shifocrm/src/api/telegramApi.js ga nusxalang
- */
+
 
 const TELEGRAM_API_URL = import.meta.env.VITE_TELEGRAM_API_URL;
 const TELEGRAM_API_KEY = import.meta.env.VITE_TELEGRAM_API_KEY;

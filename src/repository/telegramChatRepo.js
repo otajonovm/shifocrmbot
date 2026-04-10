@@ -131,6 +131,28 @@ async function getLocaleByChatId(chatId) {
   return data.locale === 'ru' ? 'ru' : 'uz';
 }
 
+async function updateLocaleByChatId(chatId, locale) {
+  if (!chatId) {
+    return false;
+  }
+
+  const normalizedLocale = locale === 'ru' ? 'ru' : 'uz';
+
+  const { error } = await supabase
+    .from('telegram_chat_ids')
+    .update({
+      locale: normalizedLocale,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('chat_id', String(chatId));
+
+  if (error) {
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * Telegram chat_id ni saqlaydi yoki yangilaydi (upsert)
  * @param {Object} params
@@ -220,5 +242,6 @@ module.exports = {
   getTelegramChatId,
   getTelegramChatIdByPhone,
   getLocaleByChatId,
+  updateLocaleByChatId,
   saveTelegramChatId,
 };
