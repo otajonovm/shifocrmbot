@@ -1,4 +1,111 @@
-const supabase = require('../supabase');
+﻿const supabase = require('../supabase');
+
+const PHONE_FIELD_CANDIDATES = [
+  'phone',
+  'phone_number',
+  'mobile',
+  'phone_no',
+  'telephone',
+  'tel',
+  'contact_phone',
+];
+
+const phoneFieldsCache = new Map();
+
+function isMissingColumnError(error) {
+  if (!error) {
+    return false;
+  }
+
+  const message = String(error.message || '');
+  return (
+    error.code === 'PGRST204' ||
+    error.code === '42703' ||
+    /column .* does not exist|Could not find the .* column/i.test(message)
+  );
+}
+
+function normalizeFoundRecord(found, tableName, phoneField) {
+  const row = { ...found };
+  row.full_name = row.full_name || row.name;
+  if (!row.phone && phoneField && row[phoneField]) {
+    row.phone = row[phoneField];
+  }
+  return { ...row, _table: tableName };
+}
+
+async function detectPhoneFields(tableName) {
+  if (phoneFieldsCache.has(tableName)) {
+    return phoneFieldsCache.get(tableName);
+  }
+
+  const detectedFields = [];
+
+  for (const field of PHONE_FIELD_CANDIDATES) {
+    const { error } = await supabase
+      .from(tableName)
+      .select(field)
+      .limit(1);
+
+    if (!error) {
+      detectedFields.push(field);
+      continue;
+    }
+
+    if (!isMissingColumnError(error)) {
+      console.warn(`⚠️ Field tekshirishda xatolik (${tableName}.${field}):`, error.message);
+    }
+  }
+
+  const finalFields = detectedFields.length > 0 ? detectedFields : ['phone'];
+
+  if (detectedFields.length === 0) {
+    console.warn(`⚠️ Telefon field topilmadi (${tableName}), fallback: phone`);
+  } else {
+    console.log(`📞 Telefon field(lar) (${tableName}): ${finalFields.join(', ')}`);
+  }
+
+  phoneFieldsCache.set(tableName, finalFields);
+  return finalFields;
+}
+
+async function searchByFieldVariants(tableName, fields, variantLabel, operator, value, successTag) {
+  for (const field of fields) {
+    let query = supabase
+      .from(tableName)
+      .select('*')
+      .limit(1);
+
+    if (operator === 'eq') {
+      query = query.eq(field, value);
+    } else if (operator === 'like') {
+      query = query.like(field, value);
+    } else if (operator === 'ilike') {
+      query = query.ilike(field, value);
+    } else {
+      return null;
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      if (!isMissingColumnError(error)) {
+        console.log(`❌ Xatolik (${variantLabel}/${field}):`, error.message);
+      }
+      continue;
+    }
+
+    if (data && data.length > 0) {
+      const found = normalizeFoundRecord(data[0], tableName, field);
+      const logPhone = found.phone || found[field] || '';
+      console.log(`✅ Topildi (${successTag || variantLabel}) [${tableName}.${field}]:`, found.id, found.full_name, logPhone);
+      return found;
+    }
+  }
+
+  console.log(`❌ Topilmadi (${variantLabel})`);
+  return null;
+}
 
 /**
  * @param {string|number} patientId 
@@ -56,45 +163,24 @@ async function getPatientById(patientId) {
  */
 async function searchPhoneInTable(tableName, phone, normalizedPhone, digitsOnly) {
   console.log(`\n=== 🔎 QIDIRUV JADVALI: ${tableName.toUpperCase()} ===`);
+
+  const phoneFields = await detectPhoneFields(tableName);
+  console.log(`🔢 Qidiruv field(lar): ${phoneFields.join(', ')}`);
   
   // Avval to'g'ridan-to'g'ri qidirish
   console.log(`1️⃣ To'g'ridan-to'g'ri qidirish: "${normalizedPhone}"`);
-  let { data, error } = await supabase
-    .from(tableName)
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .limit(1);
-  
-  if (error) {
-    console.log(`❌ Xatolik (1):`, error.message);
-  } else if (data && data.length > 0) {
-    const found = data[0];
-    found.full_name = found.full_name || found.name; // 'leads' dagi name ni full_name ga moslash ehtimoli
-    console.log(`✅ Topildi (1) [${tableName}]:`, found.id, found.full_name, found.phone);
-    return { ...found, _table: tableName };
-  } else {
-    console.log(`❌ Topilmadi (1)`);
+  let found = await searchByFieldVariants(tableName, phoneFields, '1', 'eq', normalizedPhone, '1');
+  if (found) {
+    return found;
   }
   
   // Agar + bilan boshlanmasa, +998 qo'shib qayta qidirish
   if (!normalizedPhone.startsWith('+')) {
     const withPlus = `+998${normalizedPhone.replace(/^998/, '')}`;
     console.log(`2️⃣ +998 qo'shib qidirish: "${withPlus}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('phone', withPlus)
-      .limit(1));
-    
-    if (error) {
-      console.log(`❌ Xatolik (2):`, error.message);
-    } else if (data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (2) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
-    } else {
-      console.log(`❌ Topilmadi (2)`);
+    found = await searchByFieldVariants(tableName, phoneFields, '2', 'eq', withPlus, '2');
+    if (found) {
+      return found;
     }
   }
   
@@ -102,21 +188,9 @@ async function searchPhoneInTable(tableName, phone, normalizedPhone, digitsOnly)
   if (normalizedPhone.startsWith('+998')) {
     const withoutPlus = normalizedPhone.replace(/^\+998/, '998');
     console.log(`3️⃣ +siz qidirish: "${withoutPlus}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('phone', withoutPlus)
-      .limit(1));
-    
-    if (error) {
-      console.log(`❌ Xatolik (3):`, error.message);
-    } else if (data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (3) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
-    } else {
-      console.log(`❌ Topilmadi (3)`);
+    found = await searchByFieldVariants(tableName, phoneFields, '3', 'eq', withoutPlus, '3');
+    if (found) {
+      return found;
     }
   }
   
@@ -124,79 +198,39 @@ async function searchPhoneInTable(tableName, phone, normalizedPhone, digitsOnly)
     // Variant 4: 998940542722 formatida (998 + 9 raqam)
     const with998 = digitsOnly.startsWith('998') ? digitsOnly : `998${digitsOnly}`;
     console.log(`4️⃣ 998 bilan qidirish: "${with998}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('phone', with998)
-      .limit(1));
-    
-    if (!error && data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (4) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
+    found = await searchByFieldVariants(tableName, phoneFields, '4', 'eq', with998, '4');
+    if (found) {
+      return found;
     }
     
     // Variant 5: +998940542722 formatida
     const withPlus998 = `+${with998}`;
     console.log(`5️⃣ +998 bilan qidirish: "${withPlus998}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('phone', withPlus998)
-      .limit(1));
-    
-    if (!error && data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (5) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
+    found = await searchByFieldVariants(tableName, phoneFields, '5', 'eq', withPlus998, '5');
+    if (found) {
+      return found;
     }
     
     // Variant 6: Faqat oxirgi 9 raqam (940542722)
     const last9Digits = digitsOnly.length >= 9 ? digitsOnly.slice(-9) : digitsOnly;
     console.log(`6️⃣ Faqat oxirgi 9 raqam: "${last9Digits}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .eq('phone', last9Digits)
-      .limit(1));
-    
-    if (!error && data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (6) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
+    found = await searchByFieldVariants(tableName, phoneFields, '6', 'eq', last9Digits, '6');
+    if (found) {
+      return found;
     }
     
     // Variant 7: LIKE bilan qidirish (oxirgi 9 raqam bilan)
     console.log(`7️⃣ LIKE bilan qidirish (oxirgi 9 raqam): "${last9Digits}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .like('phone', `%${last9Digits}`)
-      .limit(1));
-    
-    if (!error && data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (7 - LIKE) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
+    found = await searchByFieldVariants(tableName, phoneFields, '7', 'like', `%${last9Digits}`, '7 - LIKE');
+    if (found) {
+      return found;
     }
     
     // Variant 8: ILIKE bilan qidirish (case-insensitive)
     console.log(`8️⃣ ILIKE bilan qidirish: "%${last9Digits}"`);
-    ({ data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .ilike('phone', `%${last9Digits}%`)
-      .limit(1));
-    
-    if (!error && data && data.length > 0) {
-      const found = data[0];
-      found.full_name = found.full_name || found.name;
-      console.log(`✅ Topildi (8 - ILIKE) [${tableName}]:`, found.id, found.full_name, found.phone);
-      return { ...found, _table: tableName };
+    found = await searchByFieldVariants(tableName, phoneFields, '8', 'ilike', `%${last9Digits}%`, '8 - ILIKE');
+    if (found) {
+      return found;
     }
   }
   
