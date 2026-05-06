@@ -164,6 +164,7 @@ async function getPendingMessages() {
         id,
         patient_id,
         message,
+        reminder_key,
         scheduled_time,
         telegram_chat_ids (
           chat_id,
@@ -195,6 +196,35 @@ async function getPendingMessages() {
 
     console.error('❌ Exception pending xabarlarni olishda:', err);
     return [];
+  }
+}
+
+/**
+ * Scheduled message ni ID bo'yicha olish
+ * @param {string} messageId
+ * @returns {Promise<Object|null>}
+ */
+async function getScheduledMessageById(messageId) {
+  if (!messageId) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('scheduled_messages')
+      .select('id, patient_id, reminder_key, scheduled_time, message')
+      .eq('id', messageId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ scheduled_messages olishda xatolik:', error.message);
+      return null;
+    }
+
+    return data || null;
+  } catch (err) {
+    console.error('❌ scheduled_messages exception:', err);
+    return null;
   }
 }
 
@@ -275,6 +305,7 @@ module.exports = {
   createScheduledMessage,
   createScheduledMessageUnique,
   getPendingMessages,
+  getScheduledMessageById,
   updateMessageStatus,
   scheduleFollowUpMessages
 };

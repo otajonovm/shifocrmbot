@@ -254,6 +254,21 @@ CREATE TABLE patient_completions (
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+### `appointment_responses` jadvali (2 soat oldingi eslatma javoblari)
+```sql
+CREATE TABLE appointment_responses (
+  id UUID PRIMARY KEY,
+  scheduled_message_id UUID NOT NULL,
+  patient_id TEXT NOT NULL,
+  lead_id TEXT,
+  reminder_key TEXT,
+  response TEXT NOT NULL,
+  responded_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 ```
 
 ---
@@ -264,6 +279,38 @@ CREATE TABLE patient_completions (
 2. **Tekshirish:** Har 30 soniyada `scheduled_messages` jadvalidagi pending xabarlarni tekshiradi
 3. **Yuborish:** Vaqti kelgan xabarlarni Telegram orqali yuboradi
 4. **Status yangilash:** Yuborilgan yoki yuborish muvaffaqiyatsiz bo'lgan xabarlarning statusini yangilaydi
+
+---
+
+## 2 soat oldingi eslatma tugmalari (Kelaman/Kelolmayman)
+
+2 soat oldingi eslatmada inline tugmalar yuboriladi:
+- ✅ **Ha boraman**
+- ❌ **Yo'q borolmayman**
+
+Tugma bosilganda:
+1. Javob `appointment_responses` jadvaliga saqlanadi.
+2. CRM webhook'ga javob yuboriladi (agar sozlangan bo'lsa).
+
+### Webhook sozlamalari
+`.env` (bot server) ichida:
+```
+CRM_APPOINTMENT_RESPONSE_WEBHOOK=https://your-crm.com/webhooks/appointment-response
+CRM_APPOINTMENT_RESPONSE_API_KEY=your-secret-key
+```
+
+### Webhook payload misoli
+```json
+{
+  "scheduledMessageId": "uuid",
+  "patientId": "patient_123",
+  "leadId": "lead_456",
+  "reminderKey": "lead:lead_456:appt:2026-03-17T09:30:00+05:00:offset:2",
+  "response": "yes",
+  "respondedAt": "2026-05-06T07:30:00.000Z",
+  "chatId": "1234567890"
+}
+```
 
 ---
 

@@ -2,6 +2,9 @@ const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
 const { saveTelegramChatId, getLocaleByChatId, updateLocaleByChatId } = require('./repository/telegramChatRepo');
 const { getPatientByPhone } = require('./repository/patientRepo');
+const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
+const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
+const { sendAppointmentResponseWebhook } = require('./services/appointmentResponseWebhook');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const pollingEnabled = process.env.TELEGRAM_POLLING_ENABLED !== 'false';
@@ -149,6 +152,11 @@ const messages = {
       `Пожалуйста, введите правильный номер телефона или обратитесь к администратору.`,
   },
 };
+
+function parseLeadIdFromReminderKey(reminderKey) {
+  const match = String(reminderKey || '').match(/^lead:([^:]+):/);
+  return match ? match[1] : null;
+}
 
 function formatMessage(template, params = {}) {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ''));
@@ -424,6 +432,68 @@ bot.on('polling_error', async (error) => {
       console.error('❌ Pollingni qayta ishga tushirishda xatolik:', restartError?.message || restartError);
     }
   }, pollingRecoverDelayMs);
+});
+
+bot.on('callback_query', async (query) => {
+  const data = String(query?.data || '');
+  if (!data.startsWith('apptresp:')) {
+    return;
+  }
+
+  const parts = data.split(':');
+  const scheduledMessageId = parts[1];
+  const responseValue = parts[2] === 'yes' ? 'yes' : 'no';
+
+  if (!scheduledMessageId) {
+    await bot.answerCallbackQuery(query.id, { text: 'Xatolik: ID topilmadi' });
+    return;
+  }
+
+  const scheduledMessage = await getScheduledMessageById(scheduledMessageId);
+  if (!scheduledMessage) {
+    await bot.answerCallbackQuery(query.id, { text: 'Xabar topilmadi' });
+    return;
+  }
+
+  const reminderKey = scheduledMessage.reminder_key || null;
+  const leadId = parseLeadIdFromReminderKey(reminderKey);
+  const patientId = scheduledMessage.patient_id;
+  const respondedAt = new Date().toISOString();
+
+  await upsertAppointmentResponse({
+    scheduledMessageId: scheduledMessageId,
+    patientId,
+    leadId,
+    reminderKey,
+    response: responseValue,
+    respondedAt,
+  });
+
+  await sendAppointmentResponseWebhook({
+    scheduledMessageId,
+    patientId,
+    leadId,
+    reminderKey,
+    response: responseValue,
+    respondedAt,
+    chatId: String(query?.message?.chat?.id || ''),
+  });
+
+  const confirmText = responseValue === 'yes'
+    ? '✅ Qabulingiz tasdiqlandi'
+    : '❌ Qabulga borolmasligingiz qayd etildi';
+
+  try {
+    await bot.editMessageReplyMarkup(
+      { inline_keyboard: [] },
+      { chat_id: query.message.chat.id, message_id: query.message.message_id }
+    );
+  } catch (editError) {
+    console.warn('⚠️ Inline tugmalarni olib tashlashda xatolik:', editError?.message || editError);
+  }
+
+  await bot.answerCallbackQuery(query.id, { text: confirmText, show_alert: false });
+  await bot.sendMessage(query.message.chat.id, confirmText);
 });
 
 // Matn xabarlarini qayta ishlash (telefon raqam tekshirish)

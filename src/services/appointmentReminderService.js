@@ -120,7 +120,7 @@ function buildReminderMessage(locale, patientName, appointmentInfo, offsetHours)
       `⏰ Время: ${timePart}\n\n` +
       (offsetHours === 24
         ? `Через 24 часа у вас запись. Пожалуйста, приходите вовремя.`
-        : `Через 2 часа у вас запись. Пожалуйста, подготовьтесь заранее.`);
+        : `Через 2 часа у вас запись. Пожалуйста, подготовьтесь заранее.\n\nПодтвердите, пожалуйста, сможете ли прийти.`);
   }
 
   return `🗓 <b>Qabul eslatmasi</b>\n\n` +
@@ -129,7 +129,7 @@ function buildReminderMessage(locale, patientName, appointmentInfo, offsetHours)
     `⏰ Vaqt: ${timePart}\n\n` +
     (offsetHours === 24
       ? `24 soatdan keyin qabulingiz bor. Iltimos, vaqtida keling.`
-      : `2 soatdan keyin qabulingiz bor. Iltimos, oldindan tayyor bo'ling.`);
+      : `2 soatdan keyin qabulingiz bor. Iltimos, oldindan tayyor bo'ling.\n\nKelishingizni tasdiqlaysizmi?`);
 }
 
 function isCancelledStatus(value) {

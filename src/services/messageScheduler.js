@@ -18,6 +18,28 @@ let schedulerDisabledReason = null;
 let missingTableWarningShown = false;
 let reminderProducerRunning = false;
 
+function isTwoHourLeadReminder(reminderKey) {
+  if (!reminderKey || typeof reminderKey !== 'string') {
+    return false;
+  }
+  return reminderKey.includes('lead:') && reminderKey.includes('offset:2');
+}
+
+function buildTwoHourReminderKeyboard(messageId) {
+  if (!messageId) {
+    return null;
+  }
+
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ Ha boraman', callback_data: `apptresp:${messageId}:yes` },
+        { text: '❌ Yo\'q borolmayman', callback_data: `apptresp:${messageId}:no` }
+      ]
+    ]
+  };
+}
+
 async function runAppointmentReminderCycle() {
   if (reminderProducerRunning) {
     return { skipped: true, reason: 'PRODUCER_BUSY' };
@@ -65,10 +87,15 @@ async function checkAndSendPendingMessages() {
 
       try {
         console.log(`📤 Xabar yuborilmoqda: ${chatId}`);
-        
+
+        const replyMarkup = isTwoHourLeadReminder(msgRecord.reminder_key)
+          ? buildTwoHourReminderKeyboard(msgRecord.id)
+          : null;
+
         await schedulerBot.sendMessage(chatId, msgRecord.message, {
           parse_mode: 'HTML',
-          disable_web_page_preview: true
+          disable_web_page_preview: true,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {})
         });
 
         await updateMessageStatus(msgRecord.id, 'sent');
