@@ -2,6 +2,8 @@ const express = require('express');
 const { recordPatientCompletion, getPatientLastCompletion } = require('../repository/patientCompletionRepo');
 const { scheduleFollowUpMessages } = require('../repository/scheduledMessagesRepo');
 const { getTelegramChatIdByPhone } = require('../repository/telegramChatRepo');
+const { getPatientByPhone } = require('../repository/patientRepo');
+const { getLeadById, extractLeadContact } = require('../repository/leadRepo');
 const TelegramBot = require('node-telegram-bot-api');
 
 const router = express.Router();
@@ -63,6 +65,31 @@ function getCompletionMessage(locale) {
     `Sizning tibbiy ko'rigingiz yakunlandi!\n\n` +
     `Tez orada sizga follow-up eslatmalari yuboriladi.\n\n` +
     `Sog'lig'ingiz uchun tilaklarimiz! 🙏`;
+}
+
+async function resolveLeadCompletionContext({ leadId, phone, patientName }) {
+  let record = null;
+
+  if (phone) {
+    record = await getPatientByPhone(phone);
+  }
+
+  if (!record && leadId) {
+    record = await getLeadById(leadId);
+  }
+
+  const leadContact = record && record._table === 'leads'
+    ? extractLeadContact(record)
+    : { phone: null, name: null };
+
+  const resolvedPhone = phone || leadContact.phone || record?.phone || null;
+  const resolvedName = patientName || leadContact.name || record?.full_name || record?.name || 'Bemor';
+
+  return {
+    record,
+    resolvedPhone,
+    resolvedName,
+  };
 }
 
 /**
@@ -146,6 +173,98 @@ router.post('/complete', async (req, res) => {
 
   } catch (err) {
     console.error('❌ Bemor yakunlashda xatolik:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+/**
+ * POST /api/patients/leads/complete
+ * Lead yakunlash (lead -> patient o'tganidan keyin follow-up xabar yuborish)
+ */
+router.post('/leads/complete', async (req, res) => {
+  try {
+    const { leadId, phone, patientId, patientName, notes, customMessages } = req.body;
+
+    if (!leadId && !phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Lead ID yoki telefon raqam kerak'
+      });
+    }
+
+    const context = await resolveLeadCompletionContext({ leadId, phone, patientName });
+    const resolvedPhone = context.resolvedPhone;
+    const resolvedName = context.resolvedName;
+
+    if (!resolvedPhone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Lead telefon raqami topilmadi'
+      });
+    }
+
+    const chatInfo = await getTelegramChatIdByPhone(resolvedPhone);
+
+    if (!chatInfo) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bu telefon raqam bilan ro\'yxatdan o\'tgan foydalanuvchi topilmadi'
+      });
+    }
+
+    const resolvedPatientId = String(patientId || chatInfo.patient_id);
+
+    const completion = await recordPatientCompletion({
+      patientId: resolvedPatientId,
+      chatId: String(chatInfo.chat_id),
+      patientName: resolvedName,
+      phone: resolvedPhone,
+      notes: notes || null,
+    });
+
+    if (!completion) {
+      return res.status(500).json({
+        success: false,
+        error: 'Bemor yakunlashni saqlashda xatolik'
+      });
+    }
+
+    const locale = getLocale(chatInfo.locale);
+    const messagesToSchedule = Array.isArray(customMessages) && customMessages.length > 0
+      ? customMessages
+      : getDefaultFollowUps(locale);
+
+    const scheduledMessages = await scheduleFollowUpMessages({
+      patientId: resolvedPatientId,
+      patientName: resolvedName,
+      phone: resolvedPhone,
+      messages: messagesToSchedule
+    });
+
+    if (bot) {
+      try {
+        const welcomeMessage = getCompletionMessage(locale);
+
+        await bot.sendMessage(chatInfo.chat_id, welcomeMessage, {
+          parse_mode: 'HTML'
+        });
+      } catch (err) {
+        console.error('❌ Darhol xabarni yuborishda xatolik:', err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Lead yakunlandi va follow-up xabarlar rejalashtiryldi',
+      completion,
+      scheduledMessages: scheduledMessages.length,
+      chatId: chatInfo.chat_id
+    });
+  } catch (err) {
+    console.error('❌ Lead yakunlashda xatolik:', err);
     res.status(500).json({
       success: false,
       error: err.message

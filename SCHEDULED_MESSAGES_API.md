@@ -87,6 +87,53 @@ curl -X POST http://localhost:3001/api/patients/complete \
 
 ---
 
+### 1.1 Lead Yakunlash va Follow-up Xabarlarni Rejalashtirish
+
+**Endpoint:** `POST /api/patients/leads/complete`
+
+**Tavsifi:** Lead bemorga o'tgandan keyin yakunlash qilib, avtomatik follow-up xabarlarini rejalashtirish.
+
+**Request Body (telefon orqali):**
+```json
+{
+  "phone": "+998901234567",
+  "patientId": "patient_123",
+  "patientName": "Sardor Ibragimov",
+  "notes": "Yakunlash qilindi"
+}
+```
+
+**Request Body (leadId orqali):**
+```json
+{
+  "leadId": "lead_456",
+  "patientId": "patient_123",
+  "notes": "Yakunlash qilindi"
+}
+```
+
+**Eslatma:** Telegram chat topilishi uchun bemor botda ro'yxatdan o'tgan bo'lishi kerak.
+
+**Response (Muvaffaqiyat):**
+```json
+{
+  "success": true,
+  "message": "Lead yakunlandi va follow-up xabarlar rejalashtiryldi",
+  "completion": {
+    "id": "uuid-123",
+    "patient_id": "patient_123",
+    "chat_id": "1234567890",
+    "patient_name": "Sardor Ibragimov",
+    "phone": "+998901234567",
+    "completion_date": "2026-03-02T10:30:00Z"
+  },
+  "scheduledMessages": 2,
+  "chatId": "1234567890"
+}
+```
+
+---
+
 ### 2. Bemorning Oxirgi Yakunlash Ma'lumotini Olish
 
 **Endpoint:** `GET /api/patients/:patientId/last-completion`
