@@ -14,6 +14,21 @@ function isScheduledMessagesTableMissingError(error) {
   ) || code === 'PGRST205';
 }
 
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const column = String(columnName || '').toLowerCase();
+
+  return code === '42703' || (
+    !!column && (
+      message.includes(column) || details.includes(column)
+    ) && (
+      message.includes('column') || details.includes('column')
+    )
+  );
+}
+
 /**
  * Rejalashtirilgan xabar yaratish
  * @param {Object} params
@@ -23,7 +38,7 @@ function isScheduledMessagesTableMissingError(error) {
  * @returns {Promise<Object|null>}
  */
 async function createScheduledMessage(params) {
-  const { patientId, message, scheduledTime } = params;
+  const { patientId, message, scheduledTime, reminderKey = null } = params;
 
   if (!patientId || !message || !scheduledTime) {
     console.error('❌ Rejalashtirilgan xabar uchun kerakli parametrlar yo\'q:', params);
@@ -31,17 +46,31 @@ async function createScheduledMessage(params) {
   }
 
   try {
-    const { data, error } = await supabase
+    const payload = {
+      patient_id: patientId,
+      message: message,
+      scheduled_time: new Date(scheduledTime).toISOString(),
+      status: 'pending'
+    };
+
+    if (reminderKey) {
+      payload.reminder_key = reminderKey;
+    }
+
+    let { data, error } = await supabase
       .from('scheduled_messages')
-      .insert([
-        {
-          patient_id: patientId,
-          message: message,
-          scheduled_time: new Date(scheduledTime).toISOString(),
-          status: 'pending'
-        }
-      ])
+      .insert([payload])
       .select();
+
+    if (error && reminderKey && isMissingColumnError(error, 'reminder_key')) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.reminder_key;
+
+      ({ data, error } = await supabase
+        .from('scheduled_messages')
+        .insert([fallbackPayload])
+        .select());
+    }
 
     if (error) {
       console.error('❌ Rejalashtirilgan xabar yaratishda xatolik:', error.message);
@@ -57,6 +86,66 @@ async function createScheduledMessage(params) {
     return data[0];
   } catch (err) {
     console.error('❌ Exception rejalashtirilgan xabar yaratishda:', err);
+    return null;
+  }
+}
+
+/**
+ * Rejalashtirilgan xabar yaratish (idempotent, reminder_key asosida)
+ * @param {Object} params
+ * @param {string} params.patientId
+ * @param {string} params.message
+ * @param {Date|string} params.scheduledTime
+ * @param {string} params.reminderKey
+ * @returns {Promise<Object|null>}
+ */
+async function createScheduledMessageUnique(params) {
+  const { patientId, message, scheduledTime, reminderKey } = params || {};
+
+  if (!reminderKey) {
+    return createScheduledMessage({ patientId, message, scheduledTime });
+  }
+
+  try {
+    const { data: existing, error: findError } = await supabase
+      .from('scheduled_messages')
+      .select('id, patient_id, reminder_key, status, scheduled_time')
+      .eq('reminder_key', reminderKey)
+      .limit(1)
+      .maybeSingle();
+
+    if (!findError && existing) {
+      return { ...existing, _deduped: true };
+    }
+
+    if (findError && !isMissingColumnError(findError, 'reminder_key')) {
+      console.warn('⚠️ reminder_key bo\'yicha qidirishda xatolik:', findError.message);
+    }
+
+    const created = await createScheduledMessage({
+      patientId,
+      message,
+      scheduledTime,
+      reminderKey
+    });
+
+    return created;
+  } catch (err) {
+    const code = String(err?.code || '').toUpperCase();
+    if (code === '23505') {
+      const { data: existing } = await supabase
+        .from('scheduled_messages')
+        .select('id, patient_id, reminder_key, status, scheduled_time')
+        .eq('reminder_key', reminderKey)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        return { ...existing, _deduped: true };
+      }
+    }
+
+    console.error('❌ createScheduledMessageUnique exception:', err);
     return null;
   }
 }
@@ -184,6 +273,7 @@ async function scheduleFollowUpMessages(params) {
 
 module.exports = {
   createScheduledMessage,
+  createScheduledMessageUnique,
   getPendingMessages,
   updateMessageStatus,
   scheduleFollowUpMessages

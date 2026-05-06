@@ -8,9 +8,30 @@ const PHONE_FIELD_CANDIDATES = [
   'telephone',
   'tel',
   'contact_phone',
+  'phone1',
+  'phone_1',
+  'phone2',
+  'phone_2',
+  'primary_phone',
+  'secondary_phone',
+  'mobile_phone',
+  'cell_phone',
+  'contact',
+  'contact_number',
+  'contact_phone_number',
+  'phone_number_1',
+  'phone_number_2',
+  'client_phone',
+  'client_phone_number',
+  'lead_phone',
+  'lead_phone_number',
 ];
 
 const phoneFieldsCache = new Map();
+
+function toDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
 
 function isMissingColumnError(error) {
   if (!error) {
@@ -104,6 +125,48 @@ async function searchByFieldVariants(tableName, fields, variantLabel, operator, 
   }
 
   console.log(`❌ Topilmadi (${variantLabel})`);
+  return null;
+}
+
+async function searchByNormalizedDigitsFallback(tableName, fields, digitsOnly) {
+  if (!digitsOnly || digitsOnly.length < 9) {
+    return null;
+  }
+
+  const last9Digits = digitsOnly.slice(-9);
+  console.log(`9️⃣ Normalized fallback qidirish (digits): "${digitsOnly}" / last9="${last9Digits}"`);
+
+  const { data, error } = await supabase
+    .from(tableName)
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    console.log('❌ Xatolik (9):', error.message);
+    return null;
+  }
+
+  for (const row of data || []) {
+    for (const field of fields) {
+      if (!row[field]) {
+        continue;
+      }
+
+      const rowDigits = toDigits(row[field]);
+      if (!rowDigits) {
+        continue;
+      }
+
+      if (rowDigits === digitsOnly || rowDigits.endsWith(last9Digits)) {
+        const found = normalizeFoundRecord(row, tableName, field);
+        console.log(`✅ Topildi (9 - normalized) [${tableName}.${field}]:`, found.id, found.full_name, found.phone || row[field]);
+        return found;
+      }
+    }
+  }
+
+  console.log('❌ Topilmadi (9 - normalized)');
   return null;
 }
 
@@ -229,6 +292,11 @@ async function searchPhoneInTable(tableName, phone, normalizedPhone, digitsOnly)
     // Variant 8: ILIKE bilan qidirish (case-insensitive)
     console.log(`8️⃣ ILIKE bilan qidirish: "%${last9Digits}"`);
     found = await searchByFieldVariants(tableName, phoneFields, '8', 'ilike', `%${last9Digits}%`, '8 - ILIKE');
+    if (found) {
+      return found;
+    }
+
+    found = await searchByNormalizedDigitsFallback(tableName, phoneFields, digitsOnly);
     if (found) {
       return found;
     }

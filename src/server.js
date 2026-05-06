@@ -2,7 +2,7 @@ const express = require('express');
 const bot = require('./bot');
 const { getTelegramChatId } = require('./repository/telegramChatRepo');
 const patientCompletionApi = require('./api/patientCompletionApi');
-const { startScheduler, stopScheduler } = require('./services/messageScheduler');
+const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 
 const app = express();
 
@@ -70,6 +70,23 @@ app.get('/api/scheduler/status', (req, res) => {
     running: isSchedulerRunning(),
     checkInterval: '30 seconds'
   });
+});
+
+app.post('/api/scheduler/appointments/run', checkApiKey, async (req, res) => {
+  try {
+    const stats = await runAppointmentReminderCycle();
+    res.json({
+      ok: true,
+      stats,
+    });
+  } catch (error) {
+    console.error('Appointment reminder run endpoint xatolik:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'APPOINTMENT_REMINDER_RUN_FAILED',
+      message: error.message,
+    });
+  }
 });
 
 // Railway avtomatik PORT beradi, lekin default 3001
