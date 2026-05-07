@@ -2,6 +2,7 @@ const express = require('express');
 const bot = require('./bot');
 const { getTelegramChatId } = require('./repository/telegramChatRepo');
 const patientCompletionApi = require('./api/patientCompletionApi');
+const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 
 const app = express();
@@ -21,7 +22,8 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// API key tekshirish (agar mavjud bo'lsa)
+
+
 const apiKey = process.env.BOT_API_KEY;
 
 function checkApiKey(req, res, next) {
@@ -86,6 +88,28 @@ app.post('/api/scheduler/appointments/run', checkApiKey, async (req, res) => {
       error: 'APPOINTMENT_REMINDER_RUN_FAILED',
       message: error.message,
     });
+  }
+});
+
+// Debug endpoint: Supabase connectivity check
+app.get('/api/debug/supabase', checkApiKey, async (req, res) => {
+  try {
+    // Try a lightweight query. If your DB doesn't have `telegram_chat_ids`,
+    // this will return an error that helps diagnose migrations/permissions.
+    const { data, error } = await supabase
+      .from('telegram_chat_ids')
+      .select('patient_id')
+      .limit(1);
+
+    if (error) {
+      console.error('Supabase debug query error:', error);
+      return res.status(500).json({ ok: false, error: 'SUPABASE_QUERY_FAILED', details: error });
+    }
+
+    return res.json({ ok: true, sample: data || [] });
+  } catch (err) {
+    console.error('Supabase debug exception:', err);
+    return res.status(500).json({ ok: false, error: 'SUPABASE_EXCEPTION', message: String(err.message || err) });
   }
 });
 

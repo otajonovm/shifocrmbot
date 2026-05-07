@@ -1,5 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { getPendingMessages, updateMessageStatus } = require('../repository/scheduledMessagesRepo');
+const { getTelegramChatId } = require('../repository/telegramChatRepo');
 const { scheduleUpcomingLeadAppointmentReminders } = require('./appointmentReminderService');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -76,14 +77,17 @@ async function checkAndSendPendingMessages() {
     console.log(`📬 ${messages.length} ta pending xabar tekshirilmoqda...`);
 
     for (const msgRecord of messages) {
-      if (!msgRecord.telegram_chat_ids || msgRecord.telegram_chat_ids.length === 0) {
+      const chatIdFromRelation = Array.isArray(msgRecord.telegram_chat_ids)
+        ? msgRecord.telegram_chat_ids?.[0]?.chat_id
+        : msgRecord.telegram_chat_ids?.chat_id;
+
+      const chatId = chatIdFromRelation || await getTelegramChatId(msgRecord.patient_id);
+
+      if (!chatId) {
         console.warn(`⚠️ Chat ID topilmadi message ${msgRecord.id} uchun`);
         await updateMessageStatus(msgRecord.id, 'failed', 'Chat ID topilmadi');
         continue;
       }
-
-      const chatInfo = msgRecord.telegram_chat_ids[0];
-      const chatId = chatInfo.chat_id;
 
       try {
         console.log(`📤 Xabar yuborilmoqda: ${chatId}`);
