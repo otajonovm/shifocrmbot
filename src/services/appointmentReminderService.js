@@ -6,6 +6,8 @@ const LOOK_AHEAD_DAYS = 3;
 const REMINDER_OFFSETS_HOURS = [24, 2];
 const DEFAULT_TIMEZONE = 'Asia/Tashkent';
 const DEFAULT_TIME = '09:00';
+const IMMEDIATE_REMINDER_DELAY_MINUTES = 1;
+const TWO_HOUR_WINDOW_MINUTES = 2 * 60;
 
 function toDigits(value) {
   return String(value || '').replace(/\D/g, '');
@@ -108,12 +110,30 @@ function pickFirst(row, fieldNames) {
   return null;
 }
 
-function buildReminderMessage(locale, patientName, appointmentInfo, offsetHours) {
+function buildReminderMessage(locale, patientName, appointmentInfo, offsetHours, options = {}) {
+  const deliveryMode = options.deliveryMode || 'scheduled';
   const name = patientName || 'Bemor';
   const datePart = appointmentInfo.date;
   const timePart = appointmentInfo.time;
+  const isLateDelivery = deliveryMode === 'late';
 
   if (locale === 'ru') {
+    if (offsetHours === 24 && isLateDelivery) {
+      return `🗓 <b>Напоминание о приёме</b>\n\n` +
+        `👤 Пациент: ${name}\n` +
+        `📅 Дата: ${datePart}\n` +
+        `⏰ Время: ${timePart}\n\n` +
+        `Ваш приём уже скоро. Пожалуйста, будьте готовы вовремя.`;
+    }
+
+    if (offsetHours === 2 && isLateDelivery) {
+      return `🗓 <b>Напоминание о приёме</b>\n\n` +
+        `👤 Пациент: ${name}\n` +
+        `📅 Дата: ${datePart}\n` +
+        `⏰ Время: ${timePart}\n\n` +
+        `Ваш приём уже совсем скоро. Пожалуйста, подтвердите, сможете ли прийти.`;
+    }
+
     return `🗓 <b>Напоминание о приёме</b>\n\n` +
       `👤 Пациент: ${name}\n` +
       `📅 Дата: ${datePart}\n` +
@@ -128,8 +148,44 @@ function buildReminderMessage(locale, patientName, appointmentInfo, offsetHours)
     `📅 Sana: ${datePart}\n` +
     `⏰ Vaqt: ${timePart}\n\n` +
     (offsetHours === 24
-      ? `24 soatdan keyin qabulingiz bor. Iltimos, vaqtida keling.`
-      : `2 soatdan keyin qabulingiz bor. Iltimos, oldindan tayyor bo'ling.\n\nKelishingizni tasdiqlaysizmi?`);
+      ? (isLateDelivery
+        ? `Qabulingiz yaqinlashmoqda. Iltimos, tayyor bo'ling.`
+        : `24 soatdan keyin qabulingiz bor. Iltimos, vaqtida keling.`)
+      : (isLateDelivery
+        ? `Qabulingiz juda yaqinlashmoqda. Iltimos, kelishingizni tasdiqlang.`
+        : `2 soatdan keyin qabulingiz bor. Iltimos, oldindan tayyor bo'ling.\n\nKelishingizni tasdiqlaysizmi?`));
+}
+
+function getMinutesUntilAppointment(appointmentInfo, now = new Date()) {
+  if (!appointmentInfo?.utcDate || Number.isNaN(appointmentInfo.utcDate.getTime())) {
+    return null;
+  }
+
+  return Math.floor((appointmentInfo.utcDate.getTime() - now.getTime()) / 60000);
+}
+
+function getReminderDeliveryPlan(offsetHours, minutesUntilAppointment, now = new Date()) {
+  if (minutesUntilAppointment === null || minutesUntilAppointment <= 0) {
+    return null;
+  }
+
+  const offsetMinutes = offsetHours * 60;
+
+  if (minutesUntilAppointment > offsetMinutes) {
+    return {
+      scheduledTime: new Date(now.getTime() + (minutesUntilAppointment - offsetMinutes) * 60 * 1000),
+      deliveryMode: 'scheduled',
+    };
+  }
+
+  if (offsetHours === 24) {
+    return null;
+  }
+
+  return {
+    scheduledTime: new Date(now.getTime() + IMMEDIATE_REMINDER_DELAY_MINUTES * 60 * 1000),
+    deliveryMode: 'late',
+  };
 }
 
 function isCancelledStatus(value) {
@@ -187,7 +243,13 @@ async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_A
       continue;
     }
 
-    if (appointmentInfo.utcDate < now || appointmentInfo.utcDate > until) {
+    if (appointmentInfo.utcDate > until) {
+      skipped += 1;
+      continue;
+    }
+
+    const minutesUntilAppointment = getMinutesUntilAppointment(appointmentInfo, now);
+    if (minutesUntilAppointment === null || minutesUntilAppointment <= 0) {
       skipped += 1;
       continue;
     }
@@ -211,19 +273,20 @@ async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_A
     const leadId = String(row.id || row.lead_id || digits);
 
     for (const offsetHours of REMINDER_OFFSETS_HOURS) {
-      const scheduledTime = new Date(appointmentInfo.utcDate.getTime() - offsetHours * 60 * 60 * 1000);
-
-      if (scheduledTime <= now) {
+      const deliveryPlan = getReminderDeliveryPlan(offsetHours, minutesUntilAppointment, now);
+      if (!deliveryPlan) {
         continue;
       }
 
-      const message = buildReminderMessage(locale, leadName, appointmentInfo, offsetHours);
+      const message = buildReminderMessage(locale, leadName, appointmentInfo, offsetHours, {
+        deliveryMode: deliveryPlan.deliveryMode,
+      });
       const reminderKey = `lead:${leadId}:appt:${appointmentInfo.isoWithOffset}:offset:${offsetHours}`;
 
       const result = await createScheduledMessageUnique({
         patientId,
         message,
-        scheduledTime,
+        scheduledTime: deliveryPlan.scheduledTime,
         reminderKey,
       });
 
