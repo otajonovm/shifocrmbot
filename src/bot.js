@@ -5,7 +5,7 @@ const { getPatientByPhone } = require('./repository/patientRepo');
 const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
 const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
 const { sendAppointmentResponseWebhook } = require('./services/appointmentResponseWebhook');
-const { convertLeadToPatient } = require('./repository/leadRepo');
+const { updateLeadStatus } = require('./repository/leadRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
@@ -545,34 +545,36 @@ bot.on('callback_query', async (query) => {
   await bot.answerCallbackQuery(query.id, { text: confirmText, show_alert: false });
   await bot.sendMessage(query.message.chat.id, confirmText);
 
-  // Agar "Ha" deb javob bo'lsa, lead'ni patient'ga o'tkazish
-  if (responseValue === 'yes' && leadId) {
+  // Agar lead bo'lsa, statusni javobga qarab yangilash
+  if (leadId) {
     try {
-      console.log(`🔄 Lead conversion jarayoni boshlandi: leadId=${leadId}`);
-      const conversionResult = await convertLeadToPatient(leadId);
+      const nextLeadStatus = responseValue === 'yes' ? 'Band qilingan' : 'Rad etilgan';
+      console.log(`🔄 Lead status yangilash jarayoni boshlandi: leadId=${leadId}, status=${nextLeadStatus}`);
+      const conversionResult = await updateLeadStatus(leadId, nextLeadStatus);
       
       if (conversionResult.success) {
-        console.log(`✅ Lead muvaffaqiyatli o'tkazildi: ${conversionResult.message}`);
-        // Ixtiyoriy: Foydalanuvchiga additional follow-up xabar yuborish
+        console.log(`✅ Lead status yangilandi: ${conversionResult.message}`);
+
+        const statusMessage = responseValue === 'yes'
+          ? '🎉 Qabulga borishingiz tasdiqlandi. Status: Band qilingan.'
+          : '📝 Qabulga bora olmasligingiz qayd etildi. Status: Rad etilgan.';
+
         try {
-          await bot.sendMessage(
-            query.message.chat.id,
-            '🎉 Siz muvaffaqiyatli bemor daftariga qo\'shildingiz. Endi sizga barcha xizmatlardan foydalanish mumkin.'
-          );
+          await bot.sendMessage(query.message.chat.id, statusMessage);
         } catch (msgErr) {
-          console.warn('Follow-up xabari yuborilmadi:', msgErr?.message || msgErr);
+          console.warn('Status xabari yuborilmadi:', msgErr?.message || msgErr);
         }
       } else {
-        console.warn(`⚠️ Lead conversion muvaffaqiyatsiz: ${conversionResult.message}`);
-        await notifyAdminError('Lead conversion failed', {
+        console.warn(`⚠️ Lead status update muvaffaqiyatsiz: ${conversionResult.message}`);
+        await notifyAdminError('Lead status update failed', {
           leadId,
           patientId,
           reason: conversionResult.message,
         });
       }
     } catch (conversionErr) {
-      console.error('❌ Lead conversion exception:', conversionErr);
-      await notifyAdminError('Lead conversion exception', {
+      console.error('❌ Lead status update exception:', conversionErr);
+      await notifyAdminError('Lead status update exception', {
         leadId,
         patientId,
         error: conversionErr?.message || String(conversionErr),

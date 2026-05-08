@@ -78,14 +78,14 @@ async function getLeadById(leadId) {
   return { ...data, _table: 'leads' };
 }
 
-/**
- * Lead'ni patient qilib o'tkazish (status=converted)
- * @param {string|number} leadId
- * @returns {Promise<{success: boolean, message: string, leadData?: Object}>}
- */
-async function convertLeadToPatient(leadId) {
+async function updateLeadStatus(leadId, status) {
   if (!leadId) {
     return { success: false, message: 'Lead ID yo\'q' };
+  }
+
+  const normalizedStatus = String(status || '').trim();
+  if (!normalizedStatus) {
+    return { success: false, message: 'Status bo\'sh' };
   }
 
   try {
@@ -94,17 +94,15 @@ async function convertLeadToPatient(leadId) {
       return { success: false, message: `Lead ${leadId} topilmadi` };
     }
 
-    const leadPhone = extractLeadContact(lead).phone;
-    const leadName = extractLeadContact(lead).name;
+    const leadContact = extractLeadContact(lead);
+    console.log(
+      `🔄 Lead status yangilanmoqda: ID=${leadId}, name=${leadContact.name || "Noma'lum"}, phone=${leadContact.phone || "Noma'lum"}, status=${normalizedStatus}`
+    );
 
-    console.log(`🔄 Lead -> Patient o'tkazish boshlandi: ID=${leadId}, name=${leadName}, phone=${leadPhone}`);
-
-    // Status'ni "converted" qilib yangilash
     const { error: updateError } = await supabase
       .from('leads')
       .update({
-        status: 'converted',
-        converted_at: new Date().toISOString(),
+        status: normalizedStatus,
         updated_at: new Date().toISOString(),
       })
       .eq('id', leadId);
@@ -114,21 +112,31 @@ async function convertLeadToPatient(leadId) {
       return { success: false, message: `Lead status yangilashda xatolik: ${updateError.message}` };
     }
 
-    console.log(`✅ Lead status -> 'converted': ID=${leadId}`);
+    console.log(`✅ Lead status yangilandi: ID=${leadId} -> ${normalizedStatus}`);
 
     return {
       success: true,
-      message: `Lead ${leadId} muvaffaqiyatli o'tkazildi (status: converted)`,
+      message: `Lead ${leadId} statusi ${normalizedStatus} ga o'zgartirildi`,
       leadData: lead,
     };
   } catch (err) {
-    console.error('❌ Lead conversion exception:', err);
+    console.error('❌ Lead status update exception:', err);
     return { success: false, message: `Exception: ${err.message || err}` };
   }
+}
+
+/**
+ * Lead'ni band qilingan holatiga o'tkazish
+ * @param {string|number} leadId
+ * @returns {Promise<{success: boolean, message: string, leadData?: Object}>}
+ */
+async function convertLeadToPatient(leadId) {
+  return updateLeadStatus(leadId, 'Band qilingan');
 }
 
 module.exports = {
   extractLeadContact,
   getLeadById,
+  updateLeadStatus,
   convertLeadToPatient,
 };

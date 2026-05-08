@@ -195,7 +195,15 @@ function isCancelledStatus(value) {
   }
 
   return [
-    'cancel', 'canceled', 'cancelled', 'rejected', 'closed', 'archived', 'deleted'
+    'cancel',
+    'canceled',
+    'cancelled',
+    'rejected',
+    'rad etilgan',
+    'rad_etilgan',
+    'closed',
+    'archived',
+    'deleted'
   ].some(token => status.includes(token));
 }
 
