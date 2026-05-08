@@ -78,7 +78,57 @@ async function getLeadById(leadId) {
   return { ...data, _table: 'leads' };
 }
 
+/**
+ * Lead'ni patient qilib o'tkazish (status=converted)
+ * @param {string|number} leadId
+ * @returns {Promise<{success: boolean, message: string, leadData?: Object}>}
+ */
+async function convertLeadToPatient(leadId) {
+  if (!leadId) {
+    return { success: false, message: 'Lead ID yo\'q' };
+  }
+
+  try {
+    const lead = await getLeadById(leadId);
+    if (!lead) {
+      return { success: false, message: `Lead ${leadId} topilmadi` };
+    }
+
+    const leadPhone = extractLeadContact(lead).phone;
+    const leadName = extractLeadContact(lead).name;
+
+    console.log(`🔄 Lead -> Patient o'tkazish boshlandi: ID=${leadId}, name=${leadName}, phone=${leadPhone}`);
+
+    // Status'ni "converted" qilib yangilash
+    const { error: updateError } = await supabase
+      .from('leads')
+      .update({
+        status: 'converted',
+        converted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', leadId);
+
+    if (updateError) {
+      console.error('❌ Lead status yangilashda xatolik:', updateError.message);
+      return { success: false, message: `Lead status yangilashda xatolik: ${updateError.message}` };
+    }
+
+    console.log(`✅ Lead status -> 'converted': ID=${leadId}`);
+
+    return {
+      success: true,
+      message: `Lead ${leadId} muvaffaqiyatli o'tkazildi (status: converted)`,
+      leadData: lead,
+    };
+  } catch (err) {
+    console.error('❌ Lead conversion exception:', err);
+    return { success: false, message: `Exception: ${err.message || err}` };
+  }
+}
+
 module.exports = {
   extractLeadContact,
   getLeadById,
+  convertLeadToPatient,
 };

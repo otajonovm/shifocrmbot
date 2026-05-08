@@ -1,5 +1,43 @@
 const supabase = require('../supabase');
 
+function getMissingColumnName(error) {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+
+  const patterns = [
+    /column "([^"]+)" does not exist/i,
+    /column ([a-z0-9_]+) does not exist/i,
+    /could not find the '([^']+)' column/i,
+    /could not find the "([^"]+)" column/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(error?.message || error?.details || '').match(pattern)
+      || message.match(pattern)
+      || details.match(pattern);
+    if (match && match[1]) {
+      return String(match[1]).trim();
+    }
+  }
+
+  return null;
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const column = String(columnName || '').toLowerCase();
+
+  return code === '42703' || code === 'PGRST204' || (
+    !!column && (
+      message.includes(column) || details.includes(column)
+    ) && (
+      message.includes('column') || details.includes('column')
+    )
+  );
+}
+
 function buildPhoneCandidates(phone) {
   if (!phone || typeof phone !== 'string') {
     return [];
@@ -73,11 +111,19 @@ async function getTelegramChatIdByPhone(phone) {
   const candidates = buildPhoneCandidates(phone);
 
   for (const candidate of candidates) {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('telegram_chat_ids')
       .select('patient_id, chat_id, phone, locale')
       .eq('phone', candidate)
       .maybeSingle();
+
+    if (error && isMissingColumnError(error, 'locale')) {
+      ({ data, error } = await supabase
+        .from('telegram_chat_ids')
+        .select('patient_id, chat_id, phone')
+        .eq('phone', candidate)
+        .maybeSingle());
+    }
 
     if (!error && data) {
       return {
@@ -92,12 +138,21 @@ async function getTelegramChatIdByPhone(phone) {
   if (candidates.length > 0) {
     const last9 = candidates.find(item => /^\d{9}$/.test(item));
     if (last9) {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('telegram_chat_ids')
         .select('patient_id, chat_id, phone, locale')
         .ilike('phone', `%${last9}%`)
         .limit(1)
         .maybeSingle();
+
+      if (error && isMissingColumnError(error, 'locale')) {
+        ({ data, error } = await supabase
+          .from('telegram_chat_ids')
+          .select('patient_id, chat_id, phone')
+          .ilike('phone', `%${last9}%`)
+          .limit(1)
+          .maybeSingle());
+      }
 
       if (!error && data) {
         return {
@@ -118,11 +173,19 @@ async function getLocaleByChatId(chatId) {
     return null;
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('telegram_chat_ids')
     .select('locale')
     .eq('chat_id', String(chatId))
     .maybeSingle();
+
+  if (error && isMissingColumnError(error, 'locale')) {
+    ({ data, error } = await supabase
+      .from('telegram_chat_ids')
+      .select('chat_id')
+      .eq('chat_id', String(chatId))
+      .maybeSingle());
+  }
 
   if (error || !data || !data.locale) {
     return null;
@@ -146,6 +209,10 @@ async function updateLocaleByChatId(chatId, locale) {
     })
     .eq('chat_id', String(chatId));
 
+  if (error && isMissingColumnError(error, 'locale')) {
+    return true;
+  }
+
   if (error) {
     return false;
   }
@@ -165,8 +232,14 @@ async function updateLocaleByChatId(chatId, locale) {
  * @returns {Promise<boolean>}
  */
 async function saveTelegramChatId({ patientId, chatId, username, firstName, phone, locale }) {
+  saveTelegramChatId.lastError = null;
+
   if (!patientId || !chatId) {
     console.error('saveTelegramChatId: patientId yoki chatId bo\'sh');
+    saveTelegramChatId.lastError = {
+      message: 'patientId yoki chatId bo\'sh',
+      code: 'VALIDATION_ERROR'
+    };
     return false;
   }
   
@@ -204,38 +277,72 @@ async function saveTelegramChatId({ patientId, chatId, username, firstName, phon
       }
     }
     
-    // Endi upsert qilish
-    const { data, error } = await supabase
-      .from('telegram_chat_ids')
-      .upsert(
-        {
-          patient_id: String(patientId),
-          chat_id: String(chatId),
-          username: username || null,
-          first_name: firstName || null,
-          phone: phone || null,
-          locale: locale === 'ru' ? 'ru' : 'uz',
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: 'patient_id',
-        }
-      );
-    
-    if (error) {
+    const basePayload = {
+      patient_id: String(patientId),
+      chat_id: String(chatId),
+      username: username || null,
+      first_name: firstName || null,
+      phone: phone || null,
+      locale: locale === 'ru' ? 'ru' : 'uz',
+      updated_at: new Date().toISOString(),
+    };
+
+    const retryableColumns = new Set();
+    let lastError = null;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const payload = { ...basePayload };
+
+      for (const column of retryableColumns) {
+        delete payload[column];
+      }
+
+      const { error } = await supabase
+        .from('telegram_chat_ids')
+        .upsert(payload, { onConflict: 'patient_id' });
+
+      if (!error) {
+        console.log('✅ Telegram chat_id muvaffaqiyatli saqlandi');
+        return true;
+      }
+
+      lastError = error;
+
+      const missingColumn = getMissingColumnName(error);
+      if (missingColumn && !retryableColumns.has(missingColumn)) {
+        console.warn(`⚠️ telegram_chat_ids da yetishmayotgan column aniqlandi: ${missingColumn}, fallback qilinmoqda`);
+        retryableColumns.add(missingColumn);
+        continue;
+      }
+
       console.error('❌ Supabase upsert xatolik:', error);
       console.error('   Xatolik kodi:', error.code);
       console.error('   Xatolik xabari:', error.message);
       console.error('   Xatolik detallari:', error.details);
-      return false;
+      break;
     }
+
+    saveTelegramChatId.lastError = lastError ? {
+      code: lastError.code || null,
+      message: lastError.message || 'unknown',
+      details: lastError.details || null,
+    } : {
+      code: 'UNKNOWN',
+      message: 'Supabase upsert failed',
+      details: null,
+    };
     
-    console.log('✅ Telegram chat_id muvaffaqiyatli saqlandi');
-    return true;
   } catch (err) {
     console.error('❌ Exception saveTelegramChatId:', err);
+    saveTelegramChatId.lastError = {
+      code: err?.code || null,
+      message: err?.message || 'unknown',
+      details: err?.details || null,
+    };
     return false;
   }
+
+  return false;
 }
 
 module.exports = {

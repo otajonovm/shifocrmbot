@@ -5,8 +5,10 @@ const { getPatientByPhone } = require('./repository/patientRepo');
 const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
 const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
 const { sendAppointmentResponseWebhook } = require('./services/appointmentResponseWebhook');
+const { convertLeadToPatient } = require('./repository/leadRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
 const pollingEnabled = process.env.TELEGRAM_POLLING_ENABLED !== 'false';
 const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER === 'true';
 const pollingRecoverDelayMs = Number(process.env.TELEGRAM_POLLING_RECOVER_DELAY_MS || 30000);
@@ -268,6 +270,36 @@ async function sendStartWelcome(chatId) {
   await bot.sendMessage(chatId, t(chatId, 'startWelcome'));
 }
 
+async function notifyAdminError(title, context = {}) {
+  if (!ADMIN_CHAT_ID) {
+    return;
+  }
+
+  try {
+    const lines = [
+      `⚠️ ${title}`,
+      `Time: ${new Date().toISOString()}`,
+    ];
+
+    for (const [key, value] of Object.entries(context)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+
+      const displayValue = typeof value === 'string'
+        ? value
+        : JSON.stringify(value, null, 2);
+
+      lines.push(`${key}: ${displayValue}`);
+    }
+
+    const text = lines.join('\n').slice(0, 3900);
+    await bot.sendMessage(ADMIN_CHAT_ID, text);
+  } catch (adminErr) {
+    console.error('❌ Admin xabari yuborilmadi:', adminErr?.message || adminErr);
+  }
+}
+
 async function startRegister(chatId) {
   setUserState(chatId, { step: 'waiting_phone' });
   await bot.sendMessage(chatId, t(chatId, 'registerPrompt'), {
@@ -331,9 +363,10 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
   }
 
   const phone = normalizePhone(phoneRaw);
+  let patient = null;
 
   // ShifoCRM'dan telefon bo'yicha qidirish
-  const patient = await getPatientByPhone(phone);
+  patient = await getPatientByPhone(phone);
 
   if (!patient) {
     clearUserState(chatId);
@@ -379,10 +412,27 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
       console.error('   Patient ID:', patientId);
       console.error('   Chat ID:', chatId);
       console.error('   Phone:', phone);
+      console.error('   Last save error:', saveTelegramChatId.lastError);
+      await notifyAdminError('saveTelegramChatId failed', {
+        patientId,
+        chatId,
+        phone,
+        patientName: patient.full_name || patient.name || null,
+        table: patient._table || null,
+        lastError: saveTelegramChatId.lastError,
+      });
       await bot.sendMessage(chatId, t(chatId, 'genericError'));
     }
   } catch (err) {
     console.error('❌ Exception patient saqlashda:', err);
+    await notifyAdminError('Registration exception', {
+      patientId: patient?.id || null,
+      chatId,
+      phone,
+      patientName: patient?.full_name || patient?.name || null,
+      table: patient?._table || null,
+      stack: err?.stack || err?.message || String(err),
+    });
     await bot.sendMessage(
       chatId,
       t(chatId, 'genericErrorWithDetails', { error: err.message || 'unknown' })
@@ -494,6 +544,41 @@ bot.on('callback_query', async (query) => {
 
   await bot.answerCallbackQuery(query.id, { text: confirmText, show_alert: false });
   await bot.sendMessage(query.message.chat.id, confirmText);
+
+  // Agar "Ha" deb javob bo'lsa, lead'ni patient'ga o'tkazish
+  if (responseValue === 'yes' && leadId) {
+    try {
+      console.log(`🔄 Lead conversion jarayoni boshlandi: leadId=${leadId}`);
+      const conversionResult = await convertLeadToPatient(leadId);
+      
+      if (conversionResult.success) {
+        console.log(`✅ Lead muvaffaqiyatli o'tkazildi: ${conversionResult.message}`);
+        // Ixtiyoriy: Foydalanuvchiga additional follow-up xabar yuborish
+        try {
+          await bot.sendMessage(
+            query.message.chat.id,
+            '🎉 Siz muvaffaqiyatli bemor daftariga qo\'shildingiz. Endi sizga barcha xizmatlardan foydalanish mumkin.'
+          );
+        } catch (msgErr) {
+          console.warn('Follow-up xabari yuborilmadi:', msgErr?.message || msgErr);
+        }
+      } else {
+        console.warn(`⚠️ Lead conversion muvaffaqiyatsiz: ${conversionResult.message}`);
+        await notifyAdminError('Lead conversion failed', {
+          leadId,
+          patientId,
+          reason: conversionResult.message,
+        });
+      }
+    } catch (conversionErr) {
+      console.error('❌ Lead conversion exception:', conversionErr);
+      await notifyAdminError('Lead conversion exception', {
+        leadId,
+        patientId,
+        error: conversionErr?.message || String(conversionErr),
+      });
+    }
+  }
 });
 
 // Matn xabarlarini qayta ishlash (telefon raqam tekshirish)
