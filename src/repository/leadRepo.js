@@ -35,6 +35,19 @@ const NAME_FIELD_CANDIDATES = [
   'client_name',
 ];
 
+const CANONICAL_LEAD_STATUSES = {
+  yangi: 'Yangi',
+  boglangan: "Bog'langan",
+  'bog\'langan': "Bog'langan",
+  bandqilingan: 'Band qilingan',
+  'band qilingan': 'Band qilingan',
+  booked: 'Band qilingan',
+  qabulda: 'Qabulda',
+  radetilgan: 'Rad etilgan',
+  'rad etilgan': 'Rad etilgan',
+  rejected: 'Rad etilgan',
+};
+
 function pickFirst(row, fieldNames) {
   for (const field of fieldNames) {
     if (row[field] !== undefined && row[field] !== null && String(row[field]).trim() !== '') {
@@ -53,6 +66,25 @@ function extractLeadContact(leadRow) {
     phone: pickFirst(leadRow, PHONE_FIELD_CANDIDATES),
     name: pickFirst(leadRow, NAME_FIELD_CANDIDATES),
   };
+}
+
+function normalizeLeadStatus(status) {
+  const rawStatus = String(status || '').trim();
+  if (!rawStatus) {
+    return '';
+  }
+
+  const key = rawStatus
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const compactKey = key.replace(/\s+/g, '');
+
+  return CANONICAL_LEAD_STATUSES[key]
+    || CANONICAL_LEAD_STATUSES[compactKey]
+    || rawStatus;
 }
 
 async function getLeadById(leadId) {
@@ -83,7 +115,7 @@ async function updateLeadStatus(leadId, status) {
     return { success: false, message: 'Lead ID yo\'q' };
   }
 
-  const normalizedStatus = String(status || '').trim();
+  const normalizedStatus = normalizeLeadStatus(status);
   if (!normalizedStatus) {
     return { success: false, message: 'Status bo\'sh' };
   }
