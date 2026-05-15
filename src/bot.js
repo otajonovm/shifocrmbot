@@ -6,6 +6,8 @@ const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo'
 const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
 const { sendAppointmentResponseWebhook } = require('./services/appointmentResponseWebhook');
 const { updateLeadStatus } = require('./repository/leadRepo');
+const { upsertDoctorProfile, updateDoctorNotificationPreference, normalizeNotificationPreference } = require('./repository/doctorProfileRepo');
+const { getDoctorReminderById, recordDoctorReminderAction } = require('./repository/doctorReminderRepo');
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
@@ -85,6 +87,24 @@ const messages = {
       `❌ Iltimos, o'zingizning kontaktingizni yuboring.\n` +
       `Pastdagi "📱 Kontaktni yuborish" tugmasini bosing.`,
     sendContactOrPhone: 'Iltimos, kontakt yoki telefon raqam yuboring.',
+    doctorWelcome:
+      `🧑‍⚕️ Doktor rejimi faol.\n\n` +
+      `Doktor sifatida ro'yxatdan o'tish uchun /doctorregister buyrug'ini yuboring.\n\n` +
+      `Sozlamalar uchun /doctorprefs buyrug'ini ishlating.`,
+    doctorRegisterPrompt:
+      `🧑‍⚕️ Doktor ro'yxatdan o'tishi:\n\n` +
+      `Telefon raqamingizni kontakt orqali yuboring yoki qo'lda kiriting.\n` +
+      `Masalan: +998901234567 yoki 901234567`,
+    doctorPrefsPrompt:
+      `🔔 Doktor notification preference ni tanlang:`,
+    doctorPrefsSaved:
+      `✅ Doktor preference yangilandi: {preference}`,
+    doctorRegistrationSuccess:
+      `✅ Doktor sifatida bog'landingiz!\n\n` +
+      `Ism: {doctorName}\n` +
+      `Telefon: {phone}\n` +
+      `Role: {roleName}\n` +
+      `Preference: {preference}`,
     phoneFound:
       `✅ Bu telefon raqam ShifoCRM tizimida mavjud.\n\n` +
       `Mijoz: {name}\n` +
@@ -143,6 +163,24 @@ const messages = {
       `❌ Пожалуйста, отправьте свой контакт.\n` +
       `Нажмите кнопку "📱 Отправить контакт" ниже.`,
     sendContactOrPhone: 'Пожалуйста, отправьте контакт или номер телефона.',
+    doctorWelcome:
+      `🧑‍⚕️ Режим доктора активен.\n\n` +
+      `Для регистрации как доктор отправьте команду /doctorregister.\n\n` +
+      `Для настроек используйте /doctorprefs.`,
+    doctorRegisterPrompt:
+      `🧑‍⚕️ Регистрация доктора:\n\n` +
+      `Отправьте номер телефона через контакт или введите его вручную.\n` +
+      `Например: +998901234567 или 901234567`,
+    doctorPrefsPrompt:
+      `🔔 Выберите preference для уведомлений доктора:`,
+    doctorPrefsSaved:
+      `✅ Preference доктора обновлена: {preference}`,
+    doctorRegistrationSuccess:
+      `✅ Вы подключены как доктор!\n\n` +
+      `Имя: {doctorName}\n` +
+      `Телефон: {phone}\n` +
+      `Role: {roleName}\n` +
+      `Preference: {preference}`,
     phoneFound:
       `✅ Этот номер есть в системе ShifoCRM.\n\n` +
       `Клиент: {name}\n` +
@@ -311,6 +349,38 @@ async function startRegister(chatId) {
   });
 }
 
+async function startDoctorRegister(chatId) {
+  setUserState(chatId, { step: 'waiting_doctor_phone' });
+  await bot.sendMessage(chatId, t(chatId, 'doctorRegisterPrompt'), {
+    reply_markup: {
+      keyboard: [[{ text: t(chatId, 'sendContactBtn'), request_contact: true }]],
+      resize_keyboard: true,
+      one_time_keyboard: true,
+    },
+  });
+}
+
+function buildDoctorPrefsKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: '⚡ Urgent only', callback_data: 'doctorpref:urgent_only' },
+        { text: '📋 All appointments', callback_data: 'doctorpref:all_appointments' },
+      ],
+      [
+        { text: '🗓 Daily summary only', callback_data: 'doctorpref:daily_summary_only' },
+        { text: '🔕 Mute', callback_data: 'doctorpref:mute' },
+      ],
+    ],
+  };
+}
+
+async function sendDoctorPrefs(chatId) {
+  await bot.sendMessage(chatId, t(chatId, 'doctorPrefsPrompt'), {
+    reply_markup: buildDoctorPrefsKeyboard(),
+  });
+}
+
 // /start
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -347,6 +417,42 @@ bot.onText(/\/register/, async (msg) => {
     return;
   }
   await startRegister(chatId);
+});
+
+// /doctor
+bot.onText(/\/doctor$/, async (msg) => {
+  const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
+  if (!hasUserLocale(chatId)) {
+    setUserState(chatId, { step: 'waiting_language', pendingCommand: 'doctor' });
+    await sendLanguagePicker(chatId, 'uz');
+    return;
+  }
+  await bot.sendMessage(chatId, t(chatId, 'doctorWelcome'));
+});
+
+// /doctorregister
+bot.onText(/\/doctorregister/, async (msg) => {
+  const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
+  if (!hasUserLocale(chatId)) {
+    setUserState(chatId, { step: 'waiting_language', pendingCommand: 'doctorregister' });
+    await sendLanguagePicker(chatId, 'uz');
+    return;
+  }
+  await startDoctorRegister(chatId);
+});
+
+// /doctorprefs
+bot.onText(/\/doctorprefs/, async (msg) => {
+  const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
+  if (!hasUserLocale(chatId)) {
+    setUserState(chatId, { step: 'waiting_language', pendingCommand: 'doctorprefs' });
+    await sendLanguagePicker(chatId, 'uz');
+    return;
+  }
+  await sendDoctorPrefs(chatId);
 });
 
 // /language
@@ -440,6 +546,69 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
   }
 }
 
+async function registerDoctorByPhone({ chatId, phoneRaw, msg }) {
+  if (!isValidPhone(phoneRaw)) {
+    await bot.sendMessage(chatId, t(chatId, 'invalidPhone'));
+    return;
+  }
+
+  const phone = normalizePhone(phoneRaw);
+
+  try {
+    const doctorName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ').trim()
+      || t(chatId, 'unknownCustomer');
+
+    const saved = await upsertDoctorProfile({
+      phone,
+      chatId: String(chatId),
+      username: msg.from?.username || null,
+      firstName: msg.from?.first_name || null,
+      fullName: doctorName,
+      role: 'doctor',
+      notificationPreference: 'all_appointments',
+    });
+
+    if (!saved?.success) {
+      console.error('❌ doctor profile save failed:', saved);
+      await notifyAdminError('Doctor registration failed', {
+        chatId,
+        phone,
+        message: saved?.message || 'unknown',
+      });
+      await bot.sendMessage(chatId, t(chatId, 'genericError'));
+      return;
+    }
+
+    clearUserState(chatId);
+    const roleName = 'Doktor';
+    const preference = saved.data?.notification_preference || 'all_appointments';
+
+    await bot.sendMessage(
+      chatId,
+      t(chatId, 'doctorRegistrationSuccess', {
+        doctorName,
+        phone,
+        roleName,
+        preference,
+      }),
+      { reply_markup: { remove_keyboard: true } }
+    );
+
+    await sendDoctorPrefs(chatId);
+  } catch (err) {
+    console.error('❌ Exception doctor saqlashda:', err);
+    await notifyAdminError('Doctor registration exception', {
+      chatId,
+      phone: phoneRaw,
+      error: err?.message || String(err),
+    });
+    await bot.sendMessage(
+      chatId,
+      t(chatId, 'genericErrorWithDetails', { error: err.message || 'unknown' })
+    );
+  }
+}
+
 bot.on('polling_error', async (error) => {
   const errorText = String(error?.message || error || '');
   const isConflict = errorText.includes('409') || errorText.toLowerCase().includes('conflict');
@@ -486,6 +655,55 @@ bot.on('polling_error', async (error) => {
 
 bot.on('callback_query', async (query) => {
   const data = String(query?.data || '');
+
+  if (data.startsWith('doctorpref:')) {
+    const preference = normalizeNotificationPreference(data.split(':')[1]);
+    const chatId = String(query?.message?.chat?.id || query?.from?.id || '');
+
+    if (chatId) {
+      const profileResult = await updateDoctorNotificationPreference(chatId, preference);
+      if (!profileResult?.success) {
+        await bot.answerCallbackQuery(query.id, { text: 'Preference saqlanmadi' });
+        return;
+      }
+    }
+
+    try {
+      await bot.answerCallbackQuery(query.id, { text: '✅ Preference saqlandi' });
+      await bot.sendMessage(query.message.chat.id, t(query.message.chat.id, 'doctorPrefsSaved', { preference }));
+    } catch (err) {
+      console.warn('⚠️ Doctor preference callback xatolik:', err?.message || err);
+    }
+
+    return;
+  }
+
+  if (data.startsWith('docrem:')) {
+    const parts = data.split(':');
+    const reminderId = parts[1];
+    const actionKey = parts[2] || 'ack';
+    const reminder = await getDoctorReminderById(reminderId);
+
+    if (!reminder) {
+      await bot.answerCallbackQuery(query.id, { text: 'Reminder topilmadi' });
+      return;
+    }
+
+    const action = (reminder.action_payload?.actions || []).find(item => item.actionKey === actionKey);
+    const actionText = action?.text || actionKey;
+
+    await recordDoctorReminderAction(reminderId, actionKey, actionText);
+
+    try {
+      await bot.answerCallbackQuery(query.id, { text: `✅ ${actionText}` });
+      await bot.sendMessage(query.message.chat.id, `✅ ${actionText} qabul qilindi.`);
+    } catch (err) {
+      console.warn('⚠️ Doctor reminder action xatolik:', err?.message || err);
+    }
+
+    return;
+  }
+
   if (!data.startsWith('apptresp:')) {
     return;
   }
@@ -668,6 +886,30 @@ bot.on('message', async (msg) => {
     }
 
     await registerUserByPhone({ chatId, phoneRaw: text.trim(), msg });
+    return;
+  }
+
+  if (state && state.step === 'waiting_doctor_phone') {
+    if (text && text.startsWith('/')) {
+      return;
+    }
+
+    if (contact && contact.phone_number) {
+      if (contact.user_id && msg.from?.id && contact.user_id !== msg.from.id) {
+        await bot.sendMessage(chatId, t(chatId, 'ownContactOnly'));
+        return;
+      }
+
+      await registerDoctorByPhone({ chatId, phoneRaw: contact.phone_number, msg });
+      return;
+    }
+
+    if (!text) {
+      await bot.sendMessage(chatId, t(chatId, 'sendContactOrPhone'));
+      return;
+    }
+
+    await registerDoctorByPhone({ chatId, phoneRaw: text.trim(), msg });
     return;
   }
   

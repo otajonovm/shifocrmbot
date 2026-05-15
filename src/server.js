@@ -2,8 +2,10 @@ const express = require('express');
 const bot = require('./bot');
 const { getTelegramChatId } = require('./repository/telegramChatRepo');
 const patientCompletionApi = require('./api/patientCompletionApi');
+const doctorReminderApi = require('./api/doctorReminderApi');
 const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
+const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
 
 const app = express();
 
@@ -37,6 +39,8 @@ function checkApiKey(req, res, next) {
   }
   next();
 }
+
+app.use('/api/doctors', checkApiKey, doctorReminderApi);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -91,6 +95,23 @@ app.post('/api/scheduler/appointments/run', checkApiKey, async (req, res) => {
   }
 });
 
+app.post('/api/scheduler/doctors/run', checkApiKey, async (req, res) => {
+  try {
+    const stats = await runDoctorReminderCycle();
+    res.json({
+      ok: true,
+      stats,
+    });
+  } catch (error) {
+    console.error('Doctor reminder run endpoint xatolik:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'DOCTOR_REMINDER_RUN_FAILED',
+      message: error.message,
+    });
+  }
+});
+
 // Debug endpoint: Supabase connectivity check
 app.get('/api/debug/supabase', checkApiKey, async (req, res) => {
   try {
@@ -118,16 +139,19 @@ const PORT = process.env.PORT || 3001;
 
 // Message scheduler ni ishga tushirish
 startScheduler();
+startDoctorReminderScheduler();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM signali olindi, message scheduler to\'xtatilyapti...');
   stopScheduler();
+  stopDoctorReminderScheduler();
 });
 
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT signali olindi, message scheduler to\'xtatilyapti...');
   stopScheduler();
+  stopDoctorReminderScheduler();
 });
 
 module.exports = { app, PORT };
