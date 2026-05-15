@@ -9,12 +9,8 @@ function isMissingTableError(error, tableName) {
   const table = String(tableName || '').toLowerCase();
   const code = String(error?.code || '').toUpperCase();
 
-  return code === 'PGRST205' || (
-    table && (
-      message.includes(table) || details.includes(table)
-    ) && (
-      message.includes('table') || details.includes('table')
-    )
+  return code === 'PGRST205' || code === '42P01' || (
+    table && (message.includes(`relation "${table}" does not exist`) || details.includes(`relation "${table}" does not exist`))
   );
 }
 
