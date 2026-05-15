@@ -1,7 +1,7 @@
 -- Doktor profillari va doctor reminder queue
 CREATE TABLE IF NOT EXISTS doctor_profiles (
   phone TEXT PRIMARY KEY,
-  chat_id TEXT NOT NULL,
+  chat_id TEXT,
   telegram_username TEXT,
   telegram_first_name TEXT,
   full_name TEXT,
@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS doctor_profiles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_profiles_chat_id_unique ON doctor_profiles(chat_id);
+-- Unique index faqat chat_id mavjud bo'lganda
+CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_profiles_chat_id_unique ON doctor_profiles(chat_id)
+WHERE chat_id IS NOT NULL AND chat_id != '';
 CREATE INDEX IF NOT EXISTS idx_doctor_profiles_role ON doctor_profiles(role);
 CREATE INDEX IF NOT EXISTS idx_doctor_profiles_active ON doctor_profiles(is_active);
 

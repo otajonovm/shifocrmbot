@@ -96,15 +96,19 @@ const messages = {
       `Telefon raqamingizni kontakt orqali yuboring yoki qo'lda kiriting.\n` +
       `Masalan: +998901234567 yoki 901234567`,
     doctorPrefsPrompt:
-      `🔔 Doktor notification preference ni tanlang:`,
+      `🔔 Doktor uchun bildirishnoma sozlamasini tanlang:`,
     doctorPrefsSaved:
-      `✅ Doktor preference yangilandi: {preference}`,
+      `✅ Doktor sozlamasi yangilandi: {preference}`,
+    doctorPrefAllAppointments: '📋 Barcha qabullar',
+    doctorPrefUrgentOnly: '⚡ Faqat shoshilinch',
+    doctorPrefDailySummaryOnly: '🗓 Faqat kunlik hisobot',
+    doctorPrefMute: '🔕 Bildirishnomani o\'chirish',
     doctorRegistrationSuccess:
       `✅ Doktor sifatida bog'landingiz!\n\n` +
       `Ism: {doctorName}\n` +
       `Telefon: {phone}\n` +
-      `Role: {roleName}\n` +
-      `Preference: {preference}`,
+      `Rol: {roleName}\n` +
+      `Bildirishnoma sozlamasi: {preference}`,
     phoneFound:
       `✅ Bu telefon raqam ShifoCRM tizimida mavjud.\n\n` +
       `Mijoz: {name}\n` +
@@ -175,6 +179,10 @@ const messages = {
       `🔔 Выберите preference для уведомлений доктора:`,
     doctorPrefsSaved:
       `✅ Preference доктора обновлена: {preference}`,
+    doctorPrefAllAppointments: '📋 Все приёмы',
+    doctorPrefUrgentOnly: '⚡ Только срочные',
+    doctorPrefDailySummaryOnly: '🗓 Только дневная сводка',
+    doctorPrefMute: '🔕 Отключить уведомления',
     doctorRegistrationSuccess:
       `✅ Вы подключены как доктор!\n\n` +
       `Имя: {doctorName}\n` +
@@ -221,6 +229,20 @@ function getUserState(chatId) {
  */
 function setUserState(chatId, state) {
   userStates[chatId] = state;
+}
+
+function getDoctorPreferenceLabel(chatId, preference) {
+  const normalized = normalizeNotificationPreference(preference);
+  if (normalized === 'urgent_only') {
+    return t(chatId, 'doctorPrefUrgentOnly');
+  }
+  if (normalized === 'daily_summary_only') {
+    return t(chatId, 'doctorPrefDailySummaryOnly');
+  }
+  if (normalized === 'mute') {
+    return t(chatId, 'doctorPrefMute');
+  }
+  return t(chatId, 'doctorPrefAllAppointments');
 }
 
 function setUserLocale(chatId, locale) {
@@ -360,16 +382,16 @@ async function startDoctorRegister(chatId) {
   });
 }
 
-function buildDoctorPrefsKeyboard() {
+function buildDoctorPrefsKeyboard(chatId) {
   return {
     inline_keyboard: [
       [
-        { text: '⚡ Urgent only', callback_data: 'doctorpref:urgent_only' },
-        { text: '📋 All appointments', callback_data: 'doctorpref:all_appointments' },
+        { text: t(chatId, 'doctorPrefUrgentOnly'), callback_data: 'doctorpref:urgent_only' },
+        { text: t(chatId, 'doctorPrefAllAppointments'), callback_data: 'doctorpref:all_appointments' },
       ],
       [
-        { text: '🗓 Daily summary only', callback_data: 'doctorpref:daily_summary_only' },
-        { text: '🔕 Mute', callback_data: 'doctorpref:mute' },
+        { text: t(chatId, 'doctorPrefDailySummaryOnly'), callback_data: 'doctorpref:daily_summary_only' },
+        { text: t(chatId, 'doctorPrefMute'), callback_data: 'doctorpref:mute' },
       ],
     ],
   };
@@ -377,7 +399,7 @@ function buildDoctorPrefsKeyboard() {
 
 async function sendDoctorPrefs(chatId) {
   await bot.sendMessage(chatId, t(chatId, 'doctorPrefsPrompt'), {
-    reply_markup: buildDoctorPrefsKeyboard(),
+    reply_markup: buildDoctorPrefsKeyboard(chatId),
   });
 }
 
@@ -581,7 +603,7 @@ async function registerDoctorByPhone({ chatId, phoneRaw, msg }) {
 
     clearUserState(chatId);
     const roleName = 'Doktor';
-    const preference = saved.data?.notification_preference || 'all_appointments';
+    const preference = getDoctorPreferenceLabel(chatId, saved.data?.notification_preference || 'all_appointments');
 
     await bot.sendMessage(
       chatId,
@@ -658,6 +680,7 @@ bot.on('callback_query', async (query) => {
 
   if (data.startsWith('doctorpref:')) {
     const preference = normalizeNotificationPreference(data.split(':')[1]);
+    const preferenceLabel = getDoctorPreferenceLabel(query?.message?.chat?.id, preference);
     const chatId = String(query?.message?.chat?.id || query?.from?.id || '');
 
     if (chatId) {
@@ -669,8 +692,8 @@ bot.on('callback_query', async (query) => {
     }
 
     try {
-      await bot.answerCallbackQuery(query.id, { text: '✅ Preference saqlandi' });
-      await bot.sendMessage(query.message.chat.id, t(query.message.chat.id, 'doctorPrefsSaved', { preference }));
+      await bot.answerCallbackQuery(query.id, { text: '✅ Sozlama saqlandi' });
+      await bot.sendMessage(query.message.chat.id, t(query.message.chat.id, 'doctorPrefsSaved', { preference: preferenceLabel }));
     } catch (err) {
       console.warn('⚠️ Doctor preference callback xatolik:', err?.message || err);
     }
