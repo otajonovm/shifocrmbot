@@ -118,6 +118,52 @@ async function upsertDoctorProfile({
     updated_at: new Date().toISOString(),
   };
 
+  const existingByChat = await getDoctorByChatId(normalizedChatId);
+  if (existingByChat && existingByChat.phone && existingByChat.phone !== normalizedPhone) {
+    const updatedPayload = {
+      telegram_username: username || existingByChat.telegram_username || null,
+      telegram_first_name: firstName || existingByChat.telegram_first_name || null,
+      full_name: fullName || existingByChat.full_name || null,
+      role: role || existingByChat.role || DEFAULT_DOCTOR_ROLE,
+      notification_preference: normalizeNotificationPreference(
+        notificationPreference || existingByChat.notification_preference
+      ),
+      is_active: isActive !== false,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: updatedByChat, error: updateByChatError } = await supabase
+      .from('doctor_profiles')
+      .update(updatedPayload)
+      .eq('chat_id', normalizedChatId)
+      .select()
+      .maybeSingle();
+
+    if (updateByChatError) {
+      if (isMissingTableError(updateByChatError, 'doctor_profiles')) {
+        return { success: false, missingTable: true, message: 'doctor_profiles jadvali yoq' };
+      }
+      console.error('❌ doctor_profiles chat_id bo\'yicha yangilashda xatolik:', updateByChatError.message);
+      return { success: false, message: updateByChatError.message };
+    }
+
+    return {
+      success: true,
+      data: updatedByChat,
+      warning: 'CHAT_ALREADY_BOUND_DIFFERENT_PHONE',
+      warningMessage: 'Sizning Telegram akkauntingiz oldinroq boshqa telefon bilan bog\'langan. Eski bog\'lanish saqlandi.',
+    };
+  }
+
+  const existingByPhone = await getDoctorByPhone(normalizedPhone);
+  if (existingByPhone && existingByPhone.chat_id && existingByPhone.chat_id !== normalizedChatId) {
+    return {
+      success: false,
+      code: 'PHONE_ALREADY_BOUND',
+      message: 'Bu telefon raqami boshqa Telegram akkauntiga bog\'langan.',
+    };
+  }
+
   const { data, error } = await supabase
     .from('doctor_profiles')
     .upsert(payload, { onConflict: 'phone' })

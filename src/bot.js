@@ -109,6 +109,10 @@ const messages = {
       `Telefon: {phone}\n` +
       `Rol: {roleName}\n` +
       `Bildirishnoma sozlamasi: {preference}`,
+    doctorRegistrationWarning:
+      `ℹ️ Eslatma: {warning}`,
+    doctorRegistrationFailed:
+      `❌ Doktor sifatida ro'yxatdan o'tishda xatolik: {reason}`,
     phoneFound:
       `✅ Bu telefon raqam ShifoCRM tizimida mavjud.\n\n` +
       `Mijoz: {name}\n` +
@@ -189,6 +193,10 @@ const messages = {
       `Телефон: {phone}\n` +
       `Role: {roleName}\n` +
       `Preference: {preference}`,
+    doctorRegistrationWarning:
+      `ℹ️ Примечание: {warning}`,
+    doctorRegistrationFailed:
+      `❌ Ошибка при регистрации доктора: {reason}`,
     phoneFound:
       `✅ Этот номер есть в системе ShifoCRM.\n\n` +
       `Клиент: {name}\n` +
@@ -597,7 +605,12 @@ async function registerDoctorByPhone({ chatId, phoneRaw, msg }) {
         phone,
         message: saved?.message || 'unknown',
       });
-      await bot.sendMessage(chatId, t(chatId, 'genericError'));
+      await bot.sendMessage(
+        chatId,
+        t(chatId, 'doctorRegistrationFailed', {
+          reason: saved?.message || 'noma\'lum xatolik',
+        })
+      );
       return;
     }
 
@@ -615,6 +628,13 @@ async function registerDoctorByPhone({ chatId, phoneRaw, msg }) {
       }),
       { reply_markup: { remove_keyboard: true } }
     );
+
+    if (saved?.warningMessage) {
+      await bot.sendMessage(
+        chatId,
+        t(chatId, 'doctorRegistrationWarning', { warning: saved.warningMessage })
+      );
+    }
 
     await sendDoctorPrefs(chatId);
   } catch (err) {
