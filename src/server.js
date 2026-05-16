@@ -6,6 +6,7 @@ const doctorReminderApi = require('./api/doctorReminderApi');
 const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
+const { initDailySummaries } = require('./services/dailySummaryService');
 
 const app = express();
 
@@ -140,6 +141,7 @@ const PORT = process.env.PORT || 3001;
 // Message scheduler ni ishga tushirish
 startScheduler();
 startDoctorReminderScheduler();
+initDailySummaries();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
