@@ -1,6 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
 const { getTelegramBotOptions } = require('./utils/telegramOptions');
+const { isWebhookMode } = require('./utils/telegramMode');
 const {
   unwrapTelegramError,
   isPollingConflictError,
@@ -18,7 +19,8 @@ const { getDoctorReminderById, recordDoctorReminderAction } = require('./reposit
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
-const pollingEnabled = process.env.TELEGRAM_POLLING_ENABLED !== 'false';
+const webhookMode = isWebhookMode();
+const pollingEnabled = !webhookMode && process.env.TELEGRAM_POLLING_ENABLED !== 'false';
 const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER !== 'false';
 const pollingRecoverDelayMs = Number(process.env.TELEGRAM_POLLING_RECOVER_DELAY_MS || 30000);
 const pollingErrorLogIntervalMs = Number(process.env.TELEGRAM_POLLING_ERROR_LOG_INTERVAL_MS || 30000);
@@ -32,7 +34,9 @@ if (!botToken) {
 
 const bot = new TelegramBot(botToken, getTelegramBotOptions(pollingEnabled));
 
-if (!pollingEnabled) {
+if (webhookMode) {
+  console.log('ℹ️ Telegram webhook rejimi (polling o\'chirilgan)');
+} else if (!pollingEnabled) {
   console.log('ℹ️ Telegram polling o\'chirilgan (TELEGRAM_POLLING_ENABLED=false)');
 }
 
@@ -701,6 +705,7 @@ async function pausePollingWithRecover(reason, delayMs = pollingRecoverDelayMs) 
   }, delayMs);
 }
 
+if (pollingEnabled) {
 bot.on('polling_error', async (error) => {
   const errorText = unwrapTelegramError(error);
   const isConflict = isPollingConflictError(errorText);
@@ -751,6 +756,7 @@ bot.on('polling_error', async (error) => {
 
   await pausePollingWithRecover(`tarmoq xatosi (${consecutivePollingErrors} marta)`, backoffMs);
 });
+}
 
 bot.on('callback_query', async (query) => {
   const data = String(query?.data || '');

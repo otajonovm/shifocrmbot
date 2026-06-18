@@ -5,7 +5,7 @@
 function getTelegramBotOptions(polling = false) {
   const options = {
     request: {
-      timeout: Number(process.env.TELEGRAM_REQUEST_TIMEOUT_MS || 30000),
+      timeout: Number(process.env.TELEGRAM_REQUEST_TIMEOUT_MS || 60000),
       agentOptions: {
         keepAlive: true,
         family: 4,

@@ -7,6 +7,8 @@ const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
 const dailySummaryService = require('./services/dailySummaryService');
+const { registerWebhookRoute, deleteTelegramWebhook } = require('./services/telegramWebhookService');
+const { isWebhookMode } = require('./utils/telegramMode');
 
 const app = express();
 
@@ -25,7 +27,9 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-
+if (isWebhookMode()) {
+  registerWebhookRoute(app, bot);
+}
 
 const apiKey = process.env.BOT_API_KEY;
 
@@ -149,16 +153,18 @@ if (typeof dailySummaryService.initDailySummaries === 'function') {
 }
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM signali olindi, message scheduler to\'xtatilyapti...');
   stopScheduler();
   stopDoctorReminderScheduler();
+  await deleteTelegramWebhook(bot);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('🛑 SIGINT signali olindi, message scheduler to\'xtatilyapti...');
   stopScheduler();
   stopDoctorReminderScheduler();
+  await deleteTelegramWebhook(bot);
 });
 
 module.exports = { app, PORT };

@@ -38,14 +38,27 @@ if (allEnvVars.length > 0) {
 console.log('');
 
 const { app, PORT } = require('./server');
-// Bot avtomatik ishga tushadi (bot.js import qilinganda)
+const bot = require('./bot');
+const { setupTelegramWebhook } = require('./services/telegramWebhookService');
+const { isWebhookMode, getWebhookUrl } = require('./utils/telegramMode');
 
 // HOST environment variable (default: 0.0.0.0 - barcha network interfeyslar uchun)
 const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
+app.listen(PORT, HOST, async () => {
   console.log(`✅ Server ishga tushdi: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-  console.log(`✅ Bot polling ishlayapti`);
+
+  if (isWebhookMode()) {
+    const result = await setupTelegramWebhook(bot);
+    if (result.ok) {
+      console.log('✅ Bot webhook rejimida ishlayapti');
+    } else if (!result.skipped) {
+      console.warn('⚠️ Webhook o\'rnatilmadi — route faol, lekin Telegram hali webhook bilmaydi');
+      console.warn(`   Qo'lda o'rnating: ${getWebhookUrl() || '(URL yo\'q)'}`);
+    }
+  } else {
+    console.log('✅ Bot polling rejimida ishlayapti');
+  }
   
   // Local IP manzilni ko'rsatish (agar 0.0.0.0 bo'lsa)
   if (HOST === '0.0.0.0') {
