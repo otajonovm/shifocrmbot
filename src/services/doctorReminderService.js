@@ -1,4 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
+const { getTelegramBotOptions } = require('../utils/telegramOptions');
 const { getDoctorByPhone } = require('../repository/doctorProfileRepo');
 const {
   createDoctorReminderUnique,
@@ -14,7 +15,7 @@ if (!botToken) {
   throw new Error('TELEGRAM_BOT_TOKEN .env faylda ko\'rsatilgan bo\'lishi kerak');
 }
 
-const reminderBot = new TelegramBot(botToken, { polling: false });
+const reminderBot = new TelegramBot(botToken, getTelegramBotOptions(false));
 const CHECK_INTERVAL = 30 * 1000;
 
 let schedulerInterval = null;

@@ -1,5 +1,12 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
+const { getTelegramBotOptions } = require('./utils/telegramOptions');
+const {
+  unwrapTelegramError,
+  isPollingConflictError,
+  isPollingNetworkError,
+  getPollingErrorHint,
+} = require('./utils/pollingErrorUtils');
 const { saveTelegramChatId, getLocaleByChatId, updateLocaleByChatId } = require('./repository/telegramChatRepo');
 const { getPatientByPhone } = require('./repository/patientRepo');
 const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
@@ -12,8 +19,9 @@ const { getDoctorReminderById, recordDoctorReminderAction } = require('./reposit
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
 const pollingEnabled = process.env.TELEGRAM_POLLING_ENABLED !== 'false';
-const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER === 'true';
+const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER !== 'false';
 const pollingRecoverDelayMs = Number(process.env.TELEGRAM_POLLING_RECOVER_DELAY_MS || 30000);
+const pollingErrorLogIntervalMs = Number(process.env.TELEGRAM_POLLING_ERROR_LOG_INTERVAL_MS || 30000);
 
 if (!botToken) {
   console.error('❌ TELEGRAM_BOT_TOKEN topilmadi!');
@@ -22,7 +30,7 @@ if (!botToken) {
   throw new Error('TELEGRAM_BOT_TOKEN .env faylda ko\'rsatilgan bo\'lishi kerak');
 }
 
-const bot = new TelegramBot(botToken, { polling: pollingEnabled });
+const bot = new TelegramBot(botToken, getTelegramBotOptions(pollingEnabled));
 
 if (!pollingEnabled) {
   console.log('ℹ️ Telegram polling o\'chirilgan (TELEGRAM_POLLING_ENABLED=false)');
@@ -30,6 +38,9 @@ if (!pollingEnabled) {
 
 let pollingConflictLock = false;
 let pollingRecoverTimer = null;
+let lastPollingErrorLogAt = 0;
+let consecutivePollingErrors = 0;
+let pollingRestartInProgress = false;
 
 const LANG_UZ = "🇺🇿 O'zbekcha";
 const LANG_RU = '🇷🇺 Русский';
@@ -651,31 +662,23 @@ async function registerDoctorByPhone({ chatId, phoneRaw, msg }) {
   }
 }
 
-bot.on('polling_error', async (error) => {
-  const errorText = String(error?.message || error || '');
-  const isConflict = errorText.includes('409') || errorText.toLowerCase().includes('conflict');
-
-  if (!isConflict) {
-    console.error('❌ Telegram polling xatoligi:', errorText);
+async function pausePollingWithRecover(reason, delayMs = pollingRecoverDelayMs) {
+  if (pollingRestartInProgress) {
     return;
   }
 
-  if (pollingConflictLock) {
-    return;
-  }
-
-  pollingConflictLock = true;
-  console.error('❌ Telegram polling 409 Conflict: bir vaqtning o\'zida bir nechta instance ishlayapti.');
+  pollingRestartInProgress = true;
 
   try {
-    await bot.stopPolling();
-    console.warn('🛑 Polling vaqtincha to\'xtatildi.');
+    await bot.stopPolling({ cancel: true });
+    console.warn(`🛑 Polling vaqtincha to'xtatildi: ${reason}`);
   } catch (stopError) {
     console.error('❌ Pollingni to\'xtatishda xatolik:', stopError?.message || stopError);
   }
 
   if (!pollingAutoRecover || !pollingEnabled) {
-    console.warn('ℹ️ Auto-recover o\'chiq. Faqat bitta polling instance qoldiring.');
+    console.warn('ℹ️ Auto-recover o\'chiq. TELEGRAM_POLLING_AUTO_RECOVER=true qo\'ying yoki faqat bitta instance qoldiring.');
+    pollingRestartInProgress = false;
     return;
   }
 
@@ -685,14 +688,68 @@ bot.on('polling_error', async (error) => {
 
   pollingRecoverTimer = setTimeout(async () => {
     try {
-      console.log(`🔁 Polling qayta ishga tushirilmoqda (${pollingRecoverDelayMs}ms dan keyin)...`);
+      console.log(`🔁 Polling qayta ishga tushirilmoqda (${delayMs}ms dan keyin)...`);
       await bot.startPolling();
+      consecutivePollingErrors = 0;
       pollingConflictLock = false;
       console.log('✅ Polling qayta ishga tushdi.');
     } catch (restartError) {
       console.error('❌ Pollingni qayta ishga tushirishda xatolik:', restartError?.message || restartError);
+    } finally {
+      pollingRestartInProgress = false;
     }
-  }, pollingRecoverDelayMs);
+  }, delayMs);
+}
+
+bot.on('polling_error', async (error) => {
+  const errorText = unwrapTelegramError(error);
+  const isConflict = isPollingConflictError(errorText);
+  const isNetworkError = isPollingNetworkError(errorText);
+  const now = Date.now();
+
+  consecutivePollingErrors += 1;
+
+  const shouldLog = isConflict
+    || now - lastPollingErrorLogAt >= pollingErrorLogIntervalMs
+    || consecutivePollingErrors === 1;
+
+  if (!shouldLog) {
+    return;
+  }
+
+  lastPollingErrorLogAt = now;
+  const hint = getPollingErrorHint(errorText);
+
+  if (isConflict) {
+    if (pollingConflictLock) {
+      return;
+    }
+
+    pollingConflictLock = true;
+    console.error('❌ Telegram polling 409 Conflict: bir vaqtning o\'zida bir nechta instance ishlayapti.');
+    if (hint) {
+      console.error(`   💡 ${hint}`);
+    }
+
+    await pausePollingWithRecover('409 Conflict');
+    return;
+  }
+
+  console.error('❌ Telegram polling xatoligi:', errorText);
+  if (hint) {
+    console.error(`   💡 ${hint}`);
+  }
+
+  if (!isNetworkError || consecutivePollingErrors < 3) {
+    return;
+  }
+
+  const backoffMs = Math.min(
+    pollingRecoverDelayMs * consecutivePollingErrors,
+    Number(process.env.TELEGRAM_POLLING_MAX_BACKOFF_MS || 300000)
+  );
+
+  await pausePollingWithRecover(`tarmoq xatosi (${consecutivePollingErrors} marta)`, backoffMs);
 });
 
 bot.on('callback_query', async (query) => {

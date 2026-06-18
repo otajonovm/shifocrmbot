@@ -5,10 +5,11 @@ const { getTelegramChatIdByPhone } = require('../repository/telegramChatRepo');
 const { getPatientByPhone } = require('../repository/patientRepo');
 const { getLeadById, extractLeadContact } = require('../repository/leadRepo');
 const TelegramBot = require('node-telegram-bot-api');
+const { getTelegramBotOptions } = require('../utils/telegramOptions');
 
 const router = express.Router();
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
-const bot = botToken ? new TelegramBot(botToken, { polling: false }) : null;
+const bot = botToken ? new TelegramBot(botToken, getTelegramBotOptions(false)) : null;
 
 const DEFAULT_FOLLOW_UP_MESSAGES = {
   uz: [

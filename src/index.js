@@ -1,6 +1,12 @@
 // Railway'da .env fayl bo'lmasligi mumkin, lekin environment variables mavjud
-// dotenv faqat local development uchun
-if (require('fs').existsSync('.env')) {
+// dotenv faqat local development uchun (loyiha ildizidagi .env — cwd dan mustaqil)
+const path = require('path');
+const fs = require('fs');
+const envPath = path.resolve(__dirname, '..', '.env');
+
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
+} else if (fs.existsSync(path.resolve(process.cwd(), '.env'))) {
   require('dotenv').config();
 }
 

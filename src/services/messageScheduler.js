@@ -1,4 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
+const { getTelegramBotOptions } = require('../utils/telegramOptions');
 const { getPendingMessages, updateMessageStatus } = require('../repository/scheduledMessagesRepo');
 const { getTelegramChatId } = require('../repository/telegramChatRepo');
 const { scheduleUpcomingLeadAppointmentReminders } = require('./appointmentReminderService');
@@ -10,7 +11,7 @@ if (!botToken) {
   throw new Error('TELEGRAM_BOT_TOKEN .env faylda ko\'rsatilgan bo\'lishi kerak');
 }
 
-const schedulerBot = new TelegramBot(botToken, { polling: false });
+const schedulerBot = new TelegramBot(botToken, getTelegramBotOptions(false));
 
 // Xabarlarni yuborish uchun interval (har 30 soniyada tekshirish)
 const CHECK_INTERVAL = 30 * 1000; // 30 sekund

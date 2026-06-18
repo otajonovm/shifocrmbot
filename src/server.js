@@ -6,7 +6,7 @@ const doctorReminderApi = require('./api/doctorReminderApi');
 const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
-const { initDailySummaries } = require('./services/dailySummaryService');
+const dailySummaryService = require('./services/dailySummaryService');
 
 const app = express();
 
@@ -141,7 +141,12 @@ const PORT = process.env.PORT || 3001;
 // Message scheduler ni ishga tushirish
 startScheduler();
 startDoctorReminderScheduler();
-initDailySummaries();
+
+if (typeof dailySummaryService.initDailySummaries === 'function') {
+  dailySummaryService.initDailySummaries();
+} else {
+  console.warn('⚠️ dailySummaryService.initDailySummaries topilmadi — kunlik hisobot o\'tkazib yuborildi');
+}
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
