@@ -9,52 +9,32 @@ const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorRemi
 const dailySummaryService = require('./services/dailySummaryService');
 const { registerWebhookRoute, deleteTelegramWebhook } = require('./services/telegramWebhookService');
 const { isWebhookMode } = require('./utils/telegramMode');
+const { corsMiddleware } = require('./middleware/cors');
+const { createApiKeyMiddleware } = require('./middleware/checkApiKey');
 
 const app = express();
 
-// CORS sozlash (ShifoCRM frontend uchun)
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*'); // Production'da aniq domain ko'rsating
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-API-KEY');
-  
-  // Preflight request'lar uchun
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
+app.use(corsMiddleware);
 app.use(express.json());
 
 if (isWebhookMode()) {
   registerWebhookRoute(app, bot);
 }
 
-const apiKey = process.env.BOT_API_KEY;
-
-function checkApiKey(req, res, next) {
-  if (!apiKey) {
-    // API key yo'q, o'tkazib yuboradi
-    return next();
-  }
-  const providedKey = req.headers['x-api-key'];
-  if (providedKey !== apiKey) {
-    return res.status(401).json({ error: 'UNAUTHORIZED' });
-  }
-  next();
-}
+const checkApiKey = createApiKeyMiddleware(process.env.BOT_API_KEY);
 
 app.use('/api/doctors', checkApiKey, doctorReminderApi);
 
-// Health check
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    webhook: isWebhookMode(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// Xabar yuborish
 app.post('/api/send', checkApiKey, async (req, res) => {
-  const { patient_id, message } = req.body;
+  const { patient_id, message, parse_mode: parseMode } = req.body;
   if (!patient_id || !message) {
     return res.status(400).json({ error: 'PATIENT_ID_AND_MESSAGE_REQUIRED' });
   }
@@ -63,7 +43,10 @@ app.post('/api/send', checkApiKey, async (req, res) => {
     if (!chatId) {
       return res.status(404).json({ error: 'CHAT_ID_NOT_FOUND' });
     }
-    await bot.sendMessage(chatId, message);
+    await bot.sendMessage(chatId, message, {
+      parse_mode: parseMode || 'HTML',
+      disable_web_page_preview: true,
+    });
     res.json({ ok: true });
   } catch (error) {
     console.error('Send message error:', error);
@@ -71,15 +54,14 @@ app.post('/api/send', checkApiKey, async (req, res) => {
   }
 });
 
-// Patient completion API routes
-app.use('/api/patients', patientCompletionApi);
+app.use('/api/patients', checkApiKey, patientCompletionApi);
 
-// Scheduler holatini tekshirish
-app.get('/api/scheduler/status', (req, res) => {
-  const { isSchedulerRunning } = require('./services/messageScheduler');
+app.get('/api/scheduler/status', checkApiKey, (req, res) => {
+  const { isSchedulerRunning, getSchedulerDisabledReason } = require('./services/messageScheduler');
   res.json({
     running: isSchedulerRunning(),
-    checkInterval: '30 seconds'
+    disabledReason: getSchedulerDisabledReason(),
+    checkInterval: '30 seconds',
   });
 });
 
@@ -117,11 +99,8 @@ app.post('/api/scheduler/doctors/run', checkApiKey, async (req, res) => {
   }
 });
 
-// Debug endpoint: Supabase connectivity check
 app.get('/api/debug/supabase', checkApiKey, async (req, res) => {
   try {
-    // Try a lightweight query. If your DB doesn't have `telegram_chat_ids`,
-    // this will return an error that helps diagnose migrations/permissions.
     const { data, error } = await supabase
       .from('telegram_chat_ids')
       .select('patient_id')
@@ -139,10 +118,8 @@ app.get('/api/debug/supabase', checkApiKey, async (req, res) => {
   }
 });
 
-// Railway avtomatik PORT beradi, lekin default 3001
 const PORT = process.env.PORT || 3001;
 
-// Message scheduler ni ishga tushirish
 startScheduler();
 startDoctorReminderScheduler();
 
@@ -152,7 +129,6 @@ if (typeof dailySummaryService.initDailySummaries === 'function') {
   console.warn('⚠️ dailySummaryService.initDailySummaries topilmadi — kunlik hisobot o\'tkazib yuborildi');
 }
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM signali olindi, message scheduler to\'xtatilyapti...');
   stopScheduler();

@@ -150,12 +150,82 @@ async function createScheduledMessageUnique(params) {
   }
 }
 
+const MAX_PENDING_BATCH = Number(process.env.SCHEDULER_PENDING_BATCH_SIZE || 50);
+const PROCESSING_STALE_MS = Number(process.env.SCHEDULER_PROCESSING_STALE_MS || 10 * 60 * 1000);
+
+async function releaseStaleProcessingMessages() {
+  const staleBefore = new Date(Date.now() - PROCESSING_STALE_MS).toISOString();
+
+  const { error } = await supabase
+    .from('scheduled_messages')
+    .update({
+      status: 'pending',
+      failure_reason: 'processing timeout — qayta navbatga qo\'yildi',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('status', 'processing')
+    .lte('updated_at', staleBefore);
+
+  if (error) {
+    console.warn('⚠️ Stale processing xabarlarni tiklashda xatolik:', error.message);
+  }
+}
+
+async function claimMessageForDelivery(messageId) {
+  if (!messageId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('scheduled_messages')
+    .update({
+      status: 'processing',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId)
+    .eq('status', 'pending')
+    .select('id, patient_id, message, reminder_key, scheduled_time')
+    .maybeSingle();
+
+  if (error) {
+    console.error(`❌ Xabar claim qilishda xatolik (${messageId}):`, error.message);
+    return null;
+  }
+
+  return data || null;
+}
+
+async function scheduleMessageRetry(messageId, { retryCount, delayMs, reason }) {
+  const retryReason = `retry:${retryCount}:${String(reason || 'unknown').slice(0, 150)}`;
+  const nextTime = new Date(Date.now() + delayMs).toISOString();
+
+  const { error } = await supabase
+    .from('scheduled_messages')
+    .update({
+      status: 'pending',
+      scheduled_time: nextTime,
+      failure_reason: retryReason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId);
+
+  if (error) {
+    console.error(`❌ Xabar retry rejalashtirishda xatolik (${messageId}):`, error.message);
+    return false;
+  }
+
+  console.log(`🔁 Xabar qayta navbatga qo'yildi: ${messageId} (retry ${retryCount}, ${delayMs}ms)`);
+  return true;
+}
+
 /**
  * Pending xabarlarni olish (yuborilishi kerak bo'lgan vaqti kelgan)
  * @returns {Promise<Array>}
  */
 async function getPendingMessages() {
   try {
+    await releaseStaleProcessingMessages();
+
     const now = new Date().toISOString();
     
     const { data, error } = await supabase
@@ -166,6 +236,7 @@ async function getPendingMessages() {
         message,
         reminder_key,
         scheduled_time,
+        failure_reason,
         telegram_chat_ids (
           chat_id,
           patient_id,
@@ -174,7 +245,8 @@ async function getPendingMessages() {
       `)
       .eq('status', 'pending')
       .lte('scheduled_time', now)
-      .order('scheduled_time', { ascending: true });
+      .order('scheduled_time', { ascending: true })
+      .limit(MAX_PENDING_BATCH);
 
     if (error) {
       if (isScheduledMessagesTableMissingError(error)) {
@@ -307,5 +379,8 @@ module.exports = {
   getPendingMessages,
   getScheduledMessageById,
   updateMessageStatus,
-  scheduleFollowUpMessages
+  scheduleFollowUpMessages,
+  claimMessageForDelivery,
+  scheduleMessageRetry,
+  releaseStaleProcessingMessages,
 };

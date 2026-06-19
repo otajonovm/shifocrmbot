@@ -222,18 +222,22 @@ async function fetchLeadRows() {
   return data || [];
 }
 
-async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_AHEAD_DAYS } = {}) {
+async function scheduleRemindersForRows(rows, options = {}) {
+  const {
+    lookAheadDays = LOOK_AHEAD_DAYS,
+    sourceType = 'lead',
+    resolveContext,
+  } = options;
+
   const now = new Date();
   const until = new Date(now.getTime() + lookAheadDays * 24 * 60 * 60 * 1000);
-
-  const leads = await fetchLeadRows();
 
   let scanned = 0;
   let skipped = 0;
   let created = 0;
   let deduped = 0;
 
-  for (const row of leads) {
+  for (const row of rows) {
     scanned += 1;
 
     if (isCancelledStatus(row.status || row.state)) {
@@ -241,44 +245,20 @@ async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_A
       continue;
     }
 
-    const rawDate = pickFirst(row, ['preferred_date', 'appointment_date', 'date']);
-    const rawTime = pickFirst(row, ['preferred_time', 'appointment_time', 'time']);
-    const timezone = pickFirst(row, ['appointment_timezone', 'preferred_timezone', 'timezone']) || DEFAULT_TIMEZONE;
-    const appointmentInfo = parseAppointmentDateTime({ dateValue: rawDate, timeValue: rawTime, timezone });
-
-    if (!appointmentInfo) {
+    const context = await resolveContext(row, { now, until });
+    if (!context) {
       skipped += 1;
       continue;
     }
 
-    if (appointmentInfo.utcDate > until) {
-      skipped += 1;
-      continue;
-    }
-
-    const minutesUntilAppointment = getMinutesUntilAppointment(appointmentInfo, now);
-    if (minutesUntilAppointment === null || minutesUntilAppointment <= 0) {
-      skipped += 1;
-      continue;
-    }
-
-    const phone = pickFirst(row, ['phone', 'phone_number', 'mobile', 'telephone']);
-    const digits = toDigits(phone);
-    if (!digits || digits.length < 9) {
-      skipped += 1;
-      continue;
-    }
-
-    const chatInfo = await getTelegramChatIdByPhone(String(phone));
-    if (!chatInfo || !chatInfo.patient_id) {
-      skipped += 1;
-      continue;
-    }
-
-    const patientId = String(chatInfo.patient_id);
-    const locale = chatInfo.locale === 'ru' ? 'ru' : 'uz';
-    const leadName = pickFirst(row, ['full_name', 'name', 'patient_name']) || 'Bemor';
-    const leadId = String(row.id || row.lead_id || digits);
+    const {
+      patientId,
+      locale,
+      patientName,
+      sourceId,
+      appointmentInfo,
+      minutesUntilAppointment,
+    } = context;
 
     for (const offsetHours of REMINDER_OFFSETS_HOURS) {
       const deliveryPlan = getReminderDeliveryPlan(offsetHours, minutesUntilAppointment, now);
@@ -286,10 +266,10 @@ async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_A
         continue;
       }
 
-      const message = buildReminderMessage(locale, leadName, appointmentInfo, offsetHours, {
+      const message = buildReminderMessage(locale, patientName, appointmentInfo, offsetHours, {
         deliveryMode: deliveryPlan.deliveryMode,
       });
-      const reminderKey = `lead:${leadId}:appt:${appointmentInfo.isoWithOffset}:offset:${offsetHours}`;
+      const reminderKey = `${sourceType}:${sourceId}:appt:${appointmentInfo.isoWithOffset}:offset:${offsetHours}`;
 
       const result = await createScheduledMessageUnique({
         patientId,
@@ -306,16 +286,161 @@ async function scheduleUpcomingLeadAppointmentReminders({ lookAheadDays = LOOK_A
     }
   }
 
+  return { scanned, skipped, created, deduped, lookAheadDays, offsets: REMINDER_OFFSETS_HOURS };
+}
+
+async function resolveLeadReminderContext(row, { now, until }) {
+  const rawDate = pickFirst(row, ['preferred_date', 'appointment_date', 'date']);
+  const rawTime = pickFirst(row, ['preferred_time', 'appointment_time', 'time']);
+  const timezone = pickFirst(row, ['appointment_timezone', 'preferred_timezone', 'timezone']) || DEFAULT_TIMEZONE;
+  const appointmentInfo = parseAppointmentDateTime({ dateValue: rawDate, timeValue: rawTime, timezone });
+
+  if (!appointmentInfo || appointmentInfo.utcDate > until) {
+    return null;
+  }
+
+  const minutesUntilAppointment = getMinutesUntilAppointment(appointmentInfo, now);
+  if (minutesUntilAppointment === null || minutesUntilAppointment <= 0) {
+    return null;
+  }
+
+  const phone = pickFirst(row, ['phone', 'phone_number', 'mobile', 'telephone']);
+  const digits = toDigits(phone);
+  if (!digits || digits.length < 9) {
+    return null;
+  }
+
+  const chatInfo = await getTelegramChatIdByPhone(String(phone));
+  if (!chatInfo || !chatInfo.patient_id) {
+    return null;
+  }
+
   return {
-    scanned,
-    skipped,
-    created,
-    deduped,
+    patientId: String(chatInfo.patient_id),
+    locale: chatInfo.locale === 'ru' ? 'ru' : 'uz',
+    patientName: pickFirst(row, ['full_name', 'name', 'patient_name']) || 'Bemor',
+    sourceId: String(row.id || row.lead_id || digits),
+    appointmentInfo,
+    minutesUntilAppointment,
+  };
+}
+
+async function resolveAppointmentReminderContext(row, { now, until }) {
+  const scheduledAt = pickFirst(row, ['scheduled_at', 'appointment_time', 'start_at', 'starts_at']);
+  if (!scheduledAt) {
+    return null;
+  }
+
+  const parsedDate = new Date(scheduledAt);
+  if (Number.isNaN(parsedDate.getTime()) || parsedDate > until) {
+    return null;
+  }
+
+  const minutesUntilAppointment = Math.floor((parsedDate.getTime() - now.getTime()) / 60000);
+  if (minutesUntilAppointment <= 0) {
+    return null;
+  }
+
+  const patientId = pickFirst(row, ['patient_id', 'patientId']);
+  if (!patientId) {
+    return null;
+  }
+
+  const { getTelegramChatId, getLocaleByChatId } = require('../repository/telegramChatRepo');
+  const chatId = await getTelegramChatId(String(patientId));
+  if (!chatId) {
+    return null;
+  }
+
+  const persistedLocale = await getLocaleByChatId(chatId);
+  const locale = persistedLocale === 'ru' ? 'ru' : 'uz';
+
+  const timezone = pickFirst(row, ['appointment_timezone', 'timezone']) || DEFAULT_TIMEZONE;
+  const appointmentInfo = {
+    date: parsedDate.toISOString().slice(0, 10),
+    time: `${String(parsedDate.getHours()).padStart(2, '0')}:${String(parsedDate.getMinutes()).padStart(2, '0')}`,
+    timezone,
+    isoWithOffset: parsedDate.toISOString(),
+    utcDate: parsedDate,
+  };
+
+  return {
+    patientId: String(patientId),
+    locale,
+    patientName: pickFirst(row, ['patient_name', 'full_name', 'name']) || 'Bemor',
+    sourceId: String(row.id),
+    appointmentInfo,
+    minutesUntilAppointment,
+  };
+}
+
+async function fetchAppointmentRows(until) {
+  const nowIso = new Date().toISOString();
+  const untilIso = until.toISOString();
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('*')
+    .gte('scheduled_at', nowIso)
+    .lte('scheduled_at', untilIso)
+    .order('scheduled_at', { ascending: true })
+    .limit(1000);
+
+  if (error) {
+    if (!String(error.message || '').toLowerCase().includes('appointments')) {
+      console.warn('⚠️ appointments jadvalidan olishda xatolik:', error.message);
+    }
+    return [];
+  }
+
+  return data || [];
+}
+
+async function scheduleUpcomingLeadAppointmentReminders(options = {}) {
+  const lookAheadDays = options.lookAheadDays || LOOK_AHEAD_DAYS;
+  const until = new Date(Date.now() + lookAheadDays * 24 * 60 * 60 * 1000);
+  const leads = await fetchLeadRows();
+
+  return scheduleRemindersForRows(leads, {
     lookAheadDays,
-    offsets: REMINDER_OFFSETS_HOURS,
+    sourceType: 'lead',
+    resolveContext: resolveLeadReminderContext,
+  });
+}
+
+async function scheduleUpcomingPatientAppointmentReminders(options = {}) {
+  const lookAheadDays = options.lookAheadDays || LOOK_AHEAD_DAYS;
+  const until = new Date(Date.now() + lookAheadDays * 24 * 60 * 60 * 1000);
+  const appointments = await fetchAppointmentRows(until);
+
+  if (appointments.length === 0) {
+    return { scanned: 0, skipped: 0, created: 0, deduped: 0, lookAheadDays, offsets: REMINDER_OFFSETS_HOURS };
+  }
+
+  return scheduleRemindersForRows(appointments, {
+    lookAheadDays,
+    sourceType: 'appointment',
+    resolveContext: resolveAppointmentReminderContext,
+  });
+}
+
+async function scheduleUpcomingAppointmentReminders(options = {}) {
+  const leadStats = await scheduleUpcomingLeadAppointmentReminders(options);
+  const appointmentStats = await scheduleUpcomingPatientAppointmentReminders(options);
+
+  return {
+    leads: leadStats,
+    appointments: appointmentStats,
+    scanned: (leadStats.scanned || 0) + (appointmentStats.scanned || 0),
+    skipped: (leadStats.skipped || 0) + (appointmentStats.skipped || 0),
+    created: (leadStats.created || 0) + (appointmentStats.created || 0),
+    deduped: (leadStats.deduped || 0) + (appointmentStats.deduped || 0),
+    lookAheadDays: options.lookAheadDays || LOOK_AHEAD_DAYS,
   };
 }
 
 module.exports = {
   scheduleUpcomingLeadAppointmentReminders,
+  scheduleUpcomingPatientAppointmentReminders,
+  scheduleUpcomingAppointmentReminders,
 };

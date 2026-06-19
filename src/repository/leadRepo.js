@@ -166,9 +166,144 @@ async function convertLeadToPatient(leadId) {
   return updateLeadStatus(leadId, 'Band qilingan');
 }
 
+const OPEN_LEAD_STATUS_TOKENS = [
+  'hold',
+  'new',
+  'yangi',
+  'contacted',
+  'bog',
+  'pending',
+  'open',
+];
+
+function isOpenLeadStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  if (['expired', 'cancel', 'closed', 'archived', 'rejected', 'rad'].some((token) => normalized.includes(token))) {
+    return false;
+  }
+
+  return OPEN_LEAD_STATUS_TOKENS.some((token) => normalized.includes(token));
+}
+
+async function linkLeadToTelegram(leadId, { patientId, chatId }) {
+  if (!leadId || !patientId) {
+    return { success: false, message: 'leadId yoki patientId yo\'q' };
+  }
+
+  const lead = await getLeadById(leadId);
+  if (!lead) {
+    return { success: false, message: `Lead ${leadId} topilmadi` };
+  }
+
+  const payloads = [
+    {
+      patient_id: String(patientId),
+      telegram_linked_at: new Date().toISOString(),
+      telegram_chat_id: chatId ? String(chatId) : undefined,
+      status: isOpenLeadStatus(lead.status) ? (normalizeLeadStatus("Bog'langan") || "Bog'langan") : undefined,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      patient_id: String(patientId),
+      updated_at: new Date().toISOString(),
+    },
+  ];
+
+  for (const rawPayload of payloads) {
+    const payload = Object.fromEntries(
+      Object.entries(rawPayload).filter(([, value]) => value !== undefined)
+    );
+
+    const { error } = await supabase
+      .from('leads')
+      .update(payload)
+      .eq('id', leadId);
+
+    if (!error) {
+      console.log(`✅ Lead telegram bilan bog'landi: leadId=${leadId}, patientId=${patientId}`);
+      return { success: true, leadId, patientId };
+    }
+
+    if (payloads.indexOf(rawPayload) === payloads.length - 1) {
+      console.error('❌ Lead telegram bog\'lashda xatolik:', error.message);
+      return { success: false, message: error.message };
+    }
+  }
+
+  return { success: false, message: 'Lead yangilash muvaffaqiyatsiz' };
+}
+
+async function findOpenLeadsByPhone(phone) {
+  if (!phone) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    console.warn('⚠️ Open leads qidirishda xatolik:', error.message);
+    return [];
+  }
+
+  const digits = String(phone).replace(/\D/g, '');
+  const last9 = digits.slice(-9);
+
+  return (data || []).filter((row) => {
+    if (!isOpenLeadStatus(row.status)) {
+      return false;
+    }
+
+    const rowPhone = pickFirst(row, PHONE_FIELD_CANDIDATES);
+    if (!rowPhone) {
+      return false;
+    }
+
+    const rowDigits = String(rowPhone).replace(/\D/g, '');
+    return rowDigits === digits || (last9.length >= 9 && rowDigits.endsWith(last9));
+  });
+}
+
+async function linkOpenLeadsForPatient({ patientId, phone, chatId, preferredLeadId = null }) {
+  const linked = [];
+
+  if (preferredLeadId) {
+    const result = await linkLeadToTelegram(preferredLeadId, { patientId, chatId });
+    if (result.success) {
+      linked.push(preferredLeadId);
+    }
+  }
+
+  const openLeads = await findOpenLeadsByPhone(phone);
+  for (const lead of openLeads) {
+    const leadId = String(lead.id);
+    if (linked.includes(leadId)) {
+      continue;
+    }
+
+    const result = await linkLeadToTelegram(leadId, { patientId, chatId });
+    if (result.success) {
+      linked.push(leadId);
+    }
+  }
+
+  return linked;
+}
+
 module.exports = {
   extractLeadContact,
   getLeadById,
   updateLeadStatus,
   convertLeadToPatient,
+  linkLeadToTelegram,
+  findOpenLeadsByPhone,
+  linkOpenLeadsForPatient,
+  isOpenLeadStatus,
 };

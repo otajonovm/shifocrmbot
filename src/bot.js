@@ -13,7 +13,7 @@ const { getPatientByPhone } = require('./repository/patientRepo');
 const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
 const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
 const { sendAppointmentResponseWebhook } = require('./services/appointmentResponseWebhook');
-const { updateLeadStatus } = require('./repository/leadRepo');
+const { updateLeadStatus, getLeadById, linkOpenLeadsForPatient, linkLeadToTelegram } = require('./repository/leadRepo');
 const { upsertDoctorProfile, updateDoctorNotificationPreference, normalizeNotificationPreference } = require('./repository/doctorProfileRepo');
 const { getDoctorReminderById, recordDoctorReminderAction } = require('./repository/doctorReminderRepo');
 
@@ -384,7 +384,11 @@ async function notifyAdminError(title, context = {}) {
 }
 
 async function startRegister(chatId) {
-  setUserState(chatId, { step: 'waiting_phone' });
+  const existing = getUserState(chatId);
+  setUserState(chatId, {
+    step: 'waiting_phone',
+    pendingLeadId: existing?.pendingLeadId || null,
+  });
   await bot.sendMessage(chatId, t(chatId, 'registerPrompt'), {
     reply_markup: {
       keyboard: [[{ text: t(chatId, 'sendContactBtn'), request_contact: true }]],
@@ -426,9 +430,70 @@ async function sendDoctorPrefs(chatId) {
   });
 }
 
-// /start
-bot.onText(/\/start/, async (msg) => {
+function parseStartPayload(text) {
+  const raw = String(text || '').trim();
+  const leadMatch = raw.match(/^lead[_-]?(.+)$/i);
+  if (leadMatch) {
+    return { type: 'lead', leadId: leadMatch[1] };
+  }
+  return null;
+}
+
+async function handleLeadDeepLink({ chatId, leadId, msg }) {
+  const lead = await getLeadById(leadId);
+  if (!lead) {
+    await bot.sendMessage(chatId, `❌ Lead topilmadi: ${leadId}`);
+    return;
+  }
+
+  const state = getUserState(chatId);
+  const patientId = state?.pendingPatientId;
+
+  if (patientId) {
+    await linkLeadToTelegram(leadId, { patientId, chatId: String(chatId) });
+    await bot.sendMessage(chatId, `✅ Lead ${leadId} Telegram bilan bog'landi.`);
+    return;
+  }
+
+  setUserState(chatId, {
+    step: 'waiting_phone',
+    pendingLeadId: String(leadId),
+  });
+
+  await bot.sendMessage(
+    chatId,
+    `🔗 Lead topildi (ID: ${leadId}).\n\nRo'yxatdan o'tish uchun telefon raqamingizni yuboring:`,
+    {
+      reply_markup: {
+        keyboard: [[{ text: t(chatId, 'sendContactBtn'), request_contact: true }]],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    }
+  );
+}
+
+// /start (deep link: /start lead_123)
+bot.onText(/\/start(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   const chatId = msg.chat.id;
+  const payload = parseStartPayload(match?.[1]);
+
+  await ensureUserLocale(chatId);
+
+  if (payload?.type === 'lead' && payload.leadId) {
+    if (!hasUserLocale(chatId)) {
+      setUserState(chatId, {
+        step: 'waiting_language',
+        pendingCommand: 'start',
+        pendingLeadId: String(payload.leadId),
+      });
+      await sendLanguagePicker(chatId, getUserLocale(chatId));
+      return;
+    }
+
+    await handleLeadDeepLink({ chatId, leadId: payload.leadId, msg });
+    return;
+  }
 
   const existingLocale = await ensureUserLocale(chatId);
   if (existingLocale) {
@@ -514,6 +579,8 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
   }
 
   const phone = normalizePhone(phoneRaw);
+  const stateBeforeRegister = getUserState(chatId);
+  const preferredLeadId = stateBeforeRegister?.pendingLeadId || null;
   let patient = null;
 
   // ShifoCRM'dan telefon bo'yicha qidirish
@@ -550,6 +617,13 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
     });
 
     if (saved) {
+      const linkedLeads = await linkOpenLeadsForPatient({
+        patientId,
+        phone,
+        chatId: String(chatId),
+        preferredLeadId,
+      });
+
       clearUserState(chatId);
       const patientName = patient.full_name || t(chatId, 'unknownCustomer');
       const roleName = isLead ? t(chatId, 'roleLead') : t(chatId, 'rolePatient');
@@ -558,6 +632,13 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
         t(chatId, 'successRegistration', { patientName, roleName, patientId, phone }),
         { reply_markup: { remove_keyboard: true } }
       );
+
+      if (linkedLeads.length > 0) {
+        await bot.sendMessage(
+          chatId,
+          `🔗 Lead(lar) Telegram bilan bog'landi: ${linkedLeads.join(', ')}`
+        );
+      }
     } else {
       console.error('❌ saveTelegramChatId false qaytdi');
       console.error('   Patient ID:', patientId);
@@ -928,6 +1009,7 @@ bot.on('message', async (msg) => {
       }
 
       const pendingCommand = state.pendingCommand;
+      const pendingLeadId = state.pendingLeadId || null;
       clearUserState(chatId);
 
       await bot.sendMessage(chatId, messages[selectedLocale].languageSelected, {
@@ -938,6 +1020,8 @@ bot.on('message', async (msg) => {
         await sendHelp(chatId);
       } else if (pendingCommand === 'register') {
         await startRegister(chatId);
+      } else if (pendingCommand === 'start' && pendingLeadId) {
+        await handleLeadDeepLink({ chatId, leadId: pendingLeadId, msg });
       } else if (pendingCommand === 'language') {
         await sendStartWelcome(chatId);
       } else {
