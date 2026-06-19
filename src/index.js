@@ -10,6 +10,9 @@ if (fs.existsSync(envPath)) {
   require('dotenv').config();
 }
 
+const { getTelegramModeInfo, getWebhookUrl } = require('./utils/telegramMode');
+const { testTelegramApiConnectivity } = require('./services/telegramConnectivityService');
+
 // Debug: Environment variables mavjudligini tekshirish
 console.log('🔍 Environment variables tekshirilmoqda...');
 console.log('   TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? '✅ Mavjud' : '❌ Yo\'q');
@@ -17,6 +20,15 @@ console.log('   SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Mavjud' : '❌ Y
 console.log('   SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   PORT:', process.env.PORT || '3001 (default)');
 console.log('   HOST:', process.env.HOST || '0.0.0.0 (default)');
+
+const modePreview = getTelegramModeInfo();
+console.log('   Telegram rejim:', modePreview.webhookMode ? 'WEBHOOK' : (modePreview.pollingAllowed ? 'POLLING' : 'DISABLED'));
+console.log('   Cloud runtime:', modePreview.cloud ? '✅ Ha' : '❌ Yo\'q');
+if (modePreview.webhookUrl) {
+  console.log('   Webhook URL:', modePreview.webhookUrl);
+} else if (modePreview.cloud) {
+  console.log('   ⚠️ PUBLIC_APP_URL yo\'q — DigitalOcean da webhook ishlamaydi!');
+}
 
 // Barcha environment variables'ni ko'rsatish (debug uchun)
 console.log('\n📋 Barcha environment variables:');
@@ -40,7 +52,6 @@ console.log('');
 const { app, PORT } = require('./server');
 const bot = require('./bot');
 const { setupTelegramWebhook } = require('./services/telegramWebhookService');
-const { isWebhookMode, getWebhookUrl } = require('./utils/telegramMode');
 
 // HOST environment variable (default: 0.0.0.0 - barcha network interfeyslar uchun)
 const HOST = process.env.HOST || '0.0.0.0';
@@ -48,20 +59,35 @@ const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, async () => {
   console.log(`✅ Server ishga tushdi: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
 
-  if (isWebhookMode()) {
+  const modeInfo = getTelegramModeInfo();
+
+  if (modeInfo.webhookMode) {
     const result = await setupTelegramWebhook(bot);
     if (result.ok) {
       console.log('✅ Bot webhook rejimida ishlayapti');
     } else if (!result.skipped) {
-      console.warn('⚠️ Webhook o\'rnatilmadi — route faol, lekin Telegram hali webhook bilmaydi');
-      console.warn(`   Qo'lda o'rnating: ${getWebhookUrl() || '(URL yo\'q)'}`);
+      console.warn('⚠️ setWebhook pod ichidan muvaffaqiyatsiz (ETIMEDOUT bo\'lishi mumkin)');
+      console.warn('   Webhook route faol — Telegram xabarlarini qabul qiladi');
+      console.warn('   Qo\'lda o\'rnating (local kompyuterdan):');
+      const webhookUrl = getWebhookUrl();
+      if (webhookUrl) {
+        console.warn(`   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" -d "url=${webhookUrl}"`);
+      }
+    }
+  } else if (modeInfo.cloud) {
+    console.error('❌ Cloud muhitda polling ishlamaydi. PUBLIC_APP_URL + TELEGRAM_USE_WEBHOOK=true qo\'ying');
+  } else if (modeInfo.pollingAllowed) {
+    console.log('✅ Bot polling rejimida ishlayapti');
+    const connectivity = await testTelegramApiConnectivity();
+    if (!connectivity.ok) {
+      console.warn('⚠️ api.telegram.org ga ulanish testi muvaffaqiyatsiz:', connectivity.message || connectivity.error);
     }
   } else {
-    console.log('✅ Bot polling rejimida ishlayapti');
+    console.log('ℹ️ Telegram polling o\'chirilgan');
   }
   
-  // Local IP manzilni ko'rsatish (agar 0.0.0.0 bo'lsa)
-  if (HOST === '0.0.0.0') {
+  // Local IP — faqat development uchun (cloud da PUBLIC_APP_URL ishlating)
+  if (HOST === '0.0.0.0' && !modeInfo.cloud) {
     const os = require('os');
     const networkInterfaces = os.networkInterfaces();
     const localIPs = [];

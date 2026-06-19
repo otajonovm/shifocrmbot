@@ -8,7 +8,8 @@ const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
 const dailySummaryService = require('./services/dailySummaryService');
 const { registerWebhookRoute, deleteTelegramWebhook } = require('./services/telegramWebhookService');
-const { isWebhookMode } = require('./utils/telegramMode');
+const { isWebhookMode, getTelegramModeInfo, getWebhookUrl } = require('./utils/telegramMode');
+const { testTelegramApiConnectivity } = require('./services/telegramConnectivityService');
 const { corsMiddleware } = require('./middleware/cors');
 const { createApiKeyMiddleware } = require('./middleware/checkApiKey');
 
@@ -28,8 +29,23 @@ app.use('/api/doctors', checkApiKey, doctorReminderApi);
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
-    webhook: isWebhookMode(),
+    telegram: getTelegramModeInfo(),
     timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/debug/telegram', checkApiKey, async (req, res) => {
+  const mode = getTelegramModeInfo();
+  const connectivity = await testTelegramApiConnectivity();
+
+  res.json({
+    ok: connectivity.ok,
+    mode,
+    connectivity,
+    webhookUrl: getWebhookUrl(),
+    manualSetWebhook: getWebhookUrl()
+      ? `curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" -H "Content-Type: application/json" -d "{\\"url\\":\\"${getWebhookUrl()}\\"}"`
+      : null,
   });
 });
 

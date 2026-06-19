@@ -1,7 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
 const { getTelegramBotOptions } = require('./utils/telegramOptions');
-const { isWebhookMode } = require('./utils/telegramMode');
+const { isWebhookMode, shouldForceDisablePolling, getTelegramModeInfo } = require('./utils/telegramMode');
 const {
   unwrapTelegramError,
   isPollingConflictError,
@@ -20,7 +20,26 @@ const { getDoctorReminderById, recordDoctorReminderAction } = require('./reposit
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
 const webhookMode = isWebhookMode();
-const pollingEnabled = !webhookMode && process.env.TELEGRAM_POLLING_ENABLED !== 'false';
+const forceDisablePolling = shouldForceDisablePolling();
+const pollingEnabled = !webhookMode && !forceDisablePolling && process.env.TELEGRAM_POLLING_ENABLED !== 'false';
+
+const modeInfo = getTelegramModeInfo();
+if (modeInfo.cloud && !modeInfo.webhookMode) {
+  console.error('❌ Cloud muhit (Kubernetes) aniqlandi, lekin webhook sozlanmagan!');
+  console.error('   Polling DigitalOcean da ETIMEDOUT beradi — bot ishlamaydi.');
+  console.error('   DigitalOcean Variables ga qo\'ying:');
+  console.error('   PUBLIC_APP_URL=https://SIZNING-APP.ondigitalocean.app');
+  console.error('   TELEGRAM_USE_WEBHOOK=true');
+  console.error('   TELEGRAM_POLLING_ENABLED=false');
+}
+
+if (webhookMode) {
+  console.log('ℹ️ Telegram webhook rejimi (polling o\'chirilgan)');
+} else if (forceDisablePolling) {
+  console.log('ℹ️ Telegram polling o\'chirilgan (cloud muhit, webhook kerak)');
+} else if (!pollingEnabled) {
+  console.log('ℹ️ Telegram polling o\'chirilgan (TELEGRAM_POLLING_ENABLED=false)');
+}
 const pollingAutoRecover = process.env.TELEGRAM_POLLING_AUTO_RECOVER !== 'false';
 const pollingRecoverDelayMs = Number(process.env.TELEGRAM_POLLING_RECOVER_DELAY_MS || 30000);
 const pollingErrorLogIntervalMs = Number(process.env.TELEGRAM_POLLING_ERROR_LOG_INTERVAL_MS || 30000);
@@ -33,12 +52,6 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, getTelegramBotOptions(pollingEnabled));
-
-if (webhookMode) {
-  console.log('ℹ️ Telegram webhook rejimi (polling o\'chirilgan)');
-} else if (!pollingEnabled) {
-  console.log('ℹ️ Telegram polling o\'chirilgan (TELEGRAM_POLLING_ENABLED=false)');
-}
 
 let pollingConflictLock = false;
 let pollingRecoverTimer = null;
