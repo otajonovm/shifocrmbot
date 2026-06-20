@@ -23,6 +23,7 @@ function resolvePublicBaseUrl() {
     process.env.PUBLIC_APP_URL,
     process.env.APP_URL,
     process.env.DIGITALOCEAN_APP_URL,
+    process.env.APP_DOMAIN,
   ];
 
   for (const value of candidates) {
@@ -109,6 +110,8 @@ function getTelegramModeInfo() {
   const publicBase = resolvePublicBaseUrl();
   const webhookUrl = getWebhookUrl();
   const forceDisablePolling = shouldForceDisablePolling();
+  const setupRequired = cloud && webhookMode && !webhookUrl;
+  const telegramReady = !setupRequired && (webhookMode ? !!webhookUrl : !cloud || !forceDisablePolling);
 
   return {
     cloud,
@@ -117,7 +120,21 @@ function getTelegramModeInfo() {
     publicBaseUrl: publicBase,
     webhookUrl,
     pollingAllowed: !webhookMode && !forceDisablePolling,
+    setupRequired,
+    telegramReady,
+    setupHint: setupRequired
+      ? 'DigitalOcean Variables: PUBLIC_APP_URL=${APP_URL} yoki TELEGRAM_WEBHOOK_URL=https://.../telegram/webhook'
+      : null,
   };
+}
+
+function printCloudWebhookSetupInstructions() {
+  console.error('   DigitalOcean → App → Settings → App-Level Environment Variables:');
+  console.error('   PUBLIC_APP_URL = ${APP_URL}');
+  console.error('   TELEGRAM_USE_WEBHOOK = true');
+  console.error('   TELEGRAM_POLLING_ENABLED = false');
+  console.error('   TELEGRAM_WEBHOOK_SECRET = (ixtiyoriy, random string)');
+  console.error('   Saqlang → Redeploy. Keyin /health da webhookUrl ko\'rinishi kerak.');
 }
 
 module.exports = {
@@ -128,6 +145,7 @@ module.exports = {
   isCloudRuntime,
   isPrivateOrLocalUrl,
   isWebhookMode,
+  printCloudWebhookSetupInstructions,
   resolvePublicBaseUrl,
   shouldForceDisablePolling,
 };

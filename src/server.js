@@ -27,9 +27,10 @@ const checkApiKey = createApiKeyMiddleware(process.env.BOT_API_KEY);
 app.use('/api/doctors', checkApiKey, doctorReminderApi);
 
 app.get('/health', (req, res) => {
+  const telegram = getTelegramModeInfo();
   res.json({
-    ok: true,
-    telegram: getTelegramModeInfo(),
+    ok: telegram.telegramReady !== false,
+    telegram,
     timestamp: new Date().toISOString(),
   });
 });

@@ -10,7 +10,11 @@ if (fs.existsSync(envPath)) {
   require('dotenv').config();
 }
 
-const { getTelegramModeInfo, getWebhookUrl } = require('./utils/telegramMode');
+const {
+  getTelegramModeInfo,
+  getWebhookUrl,
+  printCloudWebhookSetupInstructions,
+} = require('./utils/telegramMode');
 const { testTelegramApiConnectivity } = require('./services/telegramConnectivityService');
 
 // Debug: Environment variables mavjudligini tekshirish
@@ -20,6 +24,8 @@ console.log('   SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Mavjud' : '❌ Y
 console.log('   SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   PORT:', process.env.PORT || '3001 (default)');
 console.log('   HOST:', process.env.HOST || '0.0.0.0 (default)');
+console.log('   PUBLIC_APP_URL:', process.env.PUBLIC_APP_URL || process.env.APP_URL || '❌ Yo\'q');
+console.log('   TELEGRAM_USE_WEBHOOK:', process.env.TELEGRAM_USE_WEBHOOK || '(default)');
 
 const modePreview = getTelegramModeInfo();
 console.log('   Telegram rejim:', modePreview.webhookMode ? 'WEBHOOK' : (modePreview.pollingAllowed ? 'POLLING' : 'DISABLED'));
@@ -27,15 +33,18 @@ console.log('   Cloud runtime:', modePreview.cloud ? '✅ Ha' : '❌ Yo\'q');
 if (modePreview.webhookUrl) {
   console.log('   Webhook URL:', modePreview.webhookUrl);
 } else if (modePreview.cloud) {
-  console.log('   ⚠️ PUBLIC_APP_URL yo\'q — DigitalOcean da webhook ishlamaydi!');
+  console.log('   ⚠️ PUBLIC_APP_URL yo\'q — DigitalOcean Variables ga PUBLIC_APP_URL=${APP_URL} qo\'ying');
 }
 
 // Barcha environment variables'ni ko'rsatish (debug uchun)
 console.log('\n📋 Barcha environment variables:');
-const allEnvVars = Object.keys(process.env).filter(key => 
-  key.includes('TELEGRAM') || 
-  key.includes('SUPABASE') || 
-  key.includes('PORT') || 
+const allEnvVars = Object.keys(process.env).filter(key =>
+  key.includes('TELEGRAM') ||
+  key.includes('SUPABASE') ||
+  key.includes('PUBLIC_APP') ||
+  key.includes('APP_URL') ||
+  key.includes('APP_DOMAIN') ||
+  key.includes('PORT') ||
   key.includes('HOST')
 );
 if (allEnvVars.length > 0) {
@@ -62,20 +71,27 @@ app.listen(PORT, HOST, async () => {
   const modeInfo = getTelegramModeInfo();
 
   if (modeInfo.webhookMode) {
-    const result = await setupTelegramWebhook(bot);
-    if (result.ok) {
-      console.log('✅ Bot webhook rejimida ishlayapti');
-    } else if (!result.skipped) {
-      console.warn('⚠️ setWebhook pod ichidan muvaffaqiyatsiz (ETIMEDOUT bo\'lishi mumkin)');
-      console.warn('   Webhook route faol — Telegram xabarlarini qabul qiladi');
-      console.warn('   Qo\'lda o\'rnating (local kompyuterdan):');
-      const webhookUrl = getWebhookUrl();
-      if (webhookUrl) {
-        console.warn(`   curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" -d "url=${webhookUrl}"`);
+    if (modeInfo.setupRequired) {
+      console.error('❌ Webhook rejimi yoqilgan, lekin URL topilmadi!');
+      printCloudWebhookSetupInstructions();
+      console.error('   Yoki to\'liq URL: TELEGRAM_WEBHOOK_URL=https://sea-lion-app-9vj5b.ondigitalocean.app/telegram/webhook');
+    } else {
+      const result = await setupTelegramWebhook(bot);
+      if (result.ok) {
+        console.log('✅ Bot webhook rejimida ishlayapti');
+      } else if (!result.skipped) {
+        console.warn('⚠️ setWebhook pod ichidan muvaffaqiyatsiz (ETIMEDOUT bo\'lishi mumkin)');
+        console.warn('   Webhook route faol — Telegram xabarlarini qabul qiladi');
+        console.warn('   Localdan o\'rnating: npm run set-webhook');
+        const webhookUrl = getWebhookUrl();
+        if (webhookUrl) {
+          console.warn(`   yoki: node scripts/set-webhook.js ${webhookUrl.replace(/\/telegram\/webhook$/, '')}`);
+        }
       }
     }
   } else if (modeInfo.cloud) {
-    console.error('❌ Cloud muhitda polling ishlamaydi. PUBLIC_APP_URL + TELEGRAM_USE_WEBHOOK=true qo\'ying');
+    console.error('❌ Cloud muhitda bot faqat webhook orqali ishlaydi.');
+    printCloudWebhookSetupInstructions();
   } else if (modeInfo.pollingAllowed) {
     console.log('✅ Bot polling rejimida ishlayapti');
     const connectivity = await testTelegramApiConnectivity();

@@ -1,7 +1,12 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { normalizePhone, isValidPhone } = require('./utils/validators');
 const { getTelegramBotOptions } = require('./utils/telegramOptions');
-const { isWebhookMode, shouldForceDisablePolling, getTelegramModeInfo } = require('./utils/telegramMode');
+const {
+  isWebhookMode,
+  shouldForceDisablePolling,
+  getTelegramModeInfo,
+  printCloudWebhookSetupInstructions,
+} = require('./utils/telegramMode');
 const {
   unwrapTelegramError,
   isPollingConflictError,
@@ -25,12 +30,8 @@ const pollingEnabled = !webhookMode && !forceDisablePolling && process.env.TELEG
 
 const modeInfo = getTelegramModeInfo();
 if (modeInfo.cloud && !modeInfo.webhookMode) {
-  console.error('❌ Cloud muhit (Kubernetes) aniqlandi, lekin webhook sozlanmagan!');
-  console.error('   Polling DigitalOcean da ETIMEDOUT beradi — bot ishlamaydi.');
-  console.error('   DigitalOcean Variables ga qo\'ying:');
-  console.error('   PUBLIC_APP_URL=https://SIZNING-APP.ondigitalocean.app');
-  console.error('   TELEGRAM_USE_WEBHOOK=true');
-  console.error('   TELEGRAM_POLLING_ENABLED=false');
+  console.error('❌ Cloud muhit aniqlandi, lekin webhook sozlanmagan — bot xabar qabul qilmaydi.');
+  printCloudWebhookSetupInstructions();
 }
 
 if (webhookMode) {
