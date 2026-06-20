@@ -24,7 +24,7 @@ console.log('   SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Mavjud' : '❌ Y
 console.log('   SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Mavjud' : '❌ Yo\'q');
 console.log('   PORT:', process.env.PORT || '3001 (default)');
 console.log('   HOST:', process.env.HOST || '0.0.0.0 (default)');
-console.log('   PUBLIC_APP_URL:', process.env.PUBLIC_APP_URL || process.env.APP_URL || '❌ Yo\'q');
+console.log('   PUBLIC_APP_URL:', process.env.PUBLIC_APP_URL || process.env.APP_URL || process.env.VITE_TELEGRAM_API_URL || '❌ Yo\'q');
 console.log('   TELEGRAM_USE_WEBHOOK:', process.env.TELEGRAM_USE_WEBHOOK || '(default)');
 
 const modePreview = getTelegramModeInfo();

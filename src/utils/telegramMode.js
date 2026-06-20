@@ -24,6 +24,8 @@ function resolvePublicBaseUrl() {
     process.env.APP_URL,
     process.env.DIGITALOCEAN_APP_URL,
     process.env.APP_DOMAIN,
+    // Ba'zi deploylarda VITE_ prefiks bilan qo'yilgan (ShifoCRM uchun, lekin URL bir xil)
+    process.env.VITE_TELEGRAM_API_URL,
   ];
 
   for (const value of candidates) {

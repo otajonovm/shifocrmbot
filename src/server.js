@@ -22,7 +22,9 @@ if (isWebhookMode()) {
   registerWebhookRoute(app, bot);
 }
 
-const checkApiKey = createApiKeyMiddleware(process.env.BOT_API_KEY);
+const checkApiKey = createApiKeyMiddleware(
+  process.env.BOT_API_KEY || process.env.VITE_TELEGRAM_API_KEY
+);
 
 app.use('/api/doctors', checkApiKey, doctorReminderApi);
 
