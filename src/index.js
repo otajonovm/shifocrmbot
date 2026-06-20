@@ -79,14 +79,18 @@ app.listen(PORT, HOST, async () => {
       const result = await setupTelegramWebhook(bot);
       if (result.ok) {
         console.log('✅ Bot webhook rejimida ishlayapti');
+      } else if (result.skipped && result.reason === 'AUTO_SET_SKIPPED') {
+        console.log('✅ Bot webhook route tayyor (setWebhook localdan bir marta kerak)');
       } else if (!result.skipped) {
-        console.warn('⚠️ setWebhook pod ichidan muvaffaqiyatsiz (ETIMEDOUT bo\'lishi mumkin)');
-        console.warn('   Webhook route faol — Telegram xabarlarini qabul qiladi');
+        console.warn('⚠️ setWebhook muvaffaqiyatsiz');
         console.warn('   Localdan o\'rnating: npm run set-webhook');
-        const webhookUrl = getWebhookUrl();
-        if (webhookUrl) {
-          console.warn(`   yoki: node scripts/set-webhook.js ${webhookUrl.replace(/\/telegram\/webhook$/, '')}`);
-        }
+      }
+
+      const connectivity = await testTelegramApiConnectivity();
+      if (!connectivity.ok) {
+        console.error('❌ Pod api.telegram.org ga CHIQA OLMAYDI — javob yuborish ishlamaydi!');
+        console.error('   Xabarlar keladi, lekin bot javob bera olmaydi (ETIMEDOUT).');
+        console.error('   Yechim: Railway/Render ga ko\'chiring yoki DO regionini o\'zgartiring.');
       }
     }
   } else if (modeInfo.cloud) {

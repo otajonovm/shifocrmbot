@@ -54,6 +54,14 @@ if (!botToken) {
 
 const bot = new TelegramBot(botToken, getTelegramBotOptions(pollingEnabled));
 
+bot.on('error', (err) => {
+  console.error('❌ Telegram bot error:', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled rejection:', reason?.message || reason);
+});
+
 let pollingConflictLock = false;
 let pollingRecoverTimer = null;
 let lastPollingErrorLogAt = 0;

@@ -1,4 +1,5 @@
-const { getWebhookPath, getWebhookUrl, isWebhookMode } = require('../utils/telegramMode');
+const { getWebhookPath, getWebhookUrl, isWebhookMode, isCloudRuntime } = require('../utils/telegramMode');
+const { testTelegramApiConnectivity } = require('./telegramConnectivityService');
 
 function registerWebhookRoute(app, bot) {
   const path = getWebhookPath();
@@ -8,12 +9,20 @@ function registerWebhookRoute(app, bot) {
     if (secret) {
       const header = req.headers['x-telegram-bot-api-secret-token'];
       if (header !== secret) {
+        console.warn('⚠️ Webhook secret noto\'g\'ri — 403');
         return res.sendStatus(403);
       }
     }
 
+    const update = req.body;
+    const updateKind = update?.message?.text
+      || update?.callback_query?.data
+      || update?.update_id
+      || 'unknown';
+    console.log(`📩 Webhook update: ${updateKind}`);
+
     try {
-      bot.processUpdate(req.body);
+      bot.processUpdate(update);
       return res.sendStatus(200);
     } catch (err) {
       console.error('❌ Webhook processUpdate xatolik:', err?.message || err);
@@ -35,6 +44,20 @@ async function setupTelegramWebhook(bot) {
     return { ok: false, error: 'WEBHOOK_URL_MISSING' };
   }
 
+  if (process.env.TELEGRAM_AUTO_SET_WEBHOOK === 'false' || (isCloudRuntime() && process.env.TELEGRAM_AUTO_SET_WEBHOOK !== 'true')) {
+    console.log('ℹ️ Pod ichidan setWebhook o\'tkazib yuborildi (DigitalOcean outbound ETIMEDOUT)');
+    console.log('   Webhook route faol — localdan bir marta o\'rnating: npm run set-webhook');
+    console.log(`   URL: ${webhookUrl}`);
+    return { ok: false, skipped: true, reason: 'AUTO_SET_SKIPPED' };
+  }
+
+  const connectivity = await testTelegramApiConnectivity();
+  if (!connectivity.ok) {
+    console.warn('⚠️ api.telegram.org ga chiqib bo\'lmadi — mavjud webhook saqlanadi');
+    console.warn('   Localdan o\'rnating: npm run set-webhook');
+    return { ok: false, skipped: true, reason: 'NO_CONNECTIVITY' };
+  }
+
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   const options = {
     allowed_updates: ['message', 'callback_query'],
@@ -45,7 +68,6 @@ async function setupTelegramWebhook(bot) {
   }
 
   try {
-    await bot.deleteWebHook({ drop_pending_updates: false });
     const success = await bot.setWebHook(webhookUrl, options);
 
     if (!success) {
@@ -57,8 +79,7 @@ async function setupTelegramWebhook(bot) {
     return { ok: true, url: webhookUrl };
   } catch (err) {
     console.error('❌ Telegram webhook o\'rnatishda xatolik:', err?.message || err);
-    console.error('   💡 Agar pod api.telegram.org ga chiqa olmasa, webhookni local mashinadan o\'rnating:');
-    console.error(`   curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=${encodeURIComponent(webhookUrl)}"`);
+    console.error('   💡 Localdan o\'rnating: npm run set-webhook');
     return { ok: false, error: err?.message || String(err) };
   }
 }
