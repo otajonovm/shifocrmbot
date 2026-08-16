@@ -60,6 +60,27 @@ async function main() {
 
   console.log('✅ Webhook o\'rnatildi');
 
+  const commandsRes = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      commands: [
+        { command: 'start', description: 'Botni boshlash' },
+        { command: 'register', description: "Ro'yxatdan o'tish" },
+        { command: 'balance', description: 'Keshbek balansi' },
+        { command: 'referral', description: "Do'stni taklif qilish" },
+        { command: 'help', description: 'Yordam' },
+        { command: 'language', description: "Tilni o'zgartirish" },
+      ],
+    }),
+  });
+  const commandsData = await commandsRes.json();
+  if (commandsData.ok) {
+    console.log('✅ Bot buyruqlari yangilandi (/balance, /referral)');
+  } else {
+    console.warn('⚠️ setMyCommands:', commandsData.description || commandsData);
+  }
+
   const infoRes = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
   const infoData = await infoRes.json();
   console.log('📋 getWebhookInfo:', JSON.stringify(infoData.result, null, 2));
