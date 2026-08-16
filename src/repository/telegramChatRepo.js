@@ -99,6 +99,29 @@ async function getTelegramChatId(patientId) {
 }
 
 /**
+ * Chat ID bo'yicha patient_id ni topadi
+ * @param {string|number} chatId
+ * @returns {Promise<string|null>}
+ */
+async function getPatientIdByChatId(chatId) {
+  if (!chatId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('telegram_chat_ids')
+    .select('patient_id')
+    .eq('chat_id', String(chatId))
+    .maybeSingle();
+
+  if (error || !data?.patient_id) {
+    return null;
+  }
+
+  return String(data.patient_id);
+}
+
+/**
  * Telefon bo'yicha chat_id ni topadi
  * @param {string} phone
  * @returns {Promise<{patient_id: string, chat_id: string, phone?: string, locale?: string}|null>} chat info yoki null
@@ -347,6 +370,7 @@ async function saveTelegramChatId({ patientId, chatId, username, firstName, phon
 
 module.exports = {
   getTelegramChatId,
+  getPatientIdByChatId,
   getTelegramChatIdByPhone,
   getLocaleByChatId,
   updateLocaleByChatId,

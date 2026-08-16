@@ -3,6 +3,7 @@ const bot = require('./bot');
 const { getTelegramChatId } = require('./repository/telegramChatRepo');
 const patientCompletionApi = require('./api/patientCompletionApi');
 const doctorReminderApi = require('./api/doctorReminderApi');
+const createCashbackApi = require('./api/cashbackApi');
 const supabase = require('./supabase');
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
@@ -27,6 +28,7 @@ const checkApiKey = createApiKeyMiddleware(
 );
 
 app.use('/api/doctors', checkApiKey, doctorReminderApi);
+app.use('/api/cashback', checkApiKey, createCashbackApi(bot));
 
 app.get('/health', (req, res) => {
   const telegram = getTelegramModeInfo();

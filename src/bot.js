@@ -13,7 +13,7 @@ const {
   isPollingNetworkError,
   getPollingErrorHint,
 } = require('./utils/pollingErrorUtils');
-const { saveTelegramChatId, getLocaleByChatId, updateLocaleByChatId } = require('./repository/telegramChatRepo');
+const { saveTelegramChatId, getLocaleByChatId, updateLocaleByChatId, getPatientIdByChatId } = require('./repository/telegramChatRepo');
 const { getPatientByPhone } = require('./repository/patientRepo');
 const { getScheduledMessageById } = require('./repository/scheduledMessagesRepo');
 const { upsertAppointmentResponse } = require('./repository/appointmentResponseRepo');
@@ -21,6 +21,8 @@ const { sendAppointmentResponseWebhook } = require('./services/appointmentRespon
 const { updateLeadStatus, getLeadById, linkOpenLeadsForPatient, linkLeadToTelegram } = require('./repository/leadRepo');
 const { upsertDoctorProfile, updateDoctorNotificationPreference, normalizeNotificationPreference } = require('./repository/doctorProfileRepo');
 const { getDoctorReminderById, recordDoctorReminderAction } = require('./repository/doctorReminderRepo');
+const cashbackService = require('./services/cashbackService');
+const { formatMoney, buildReferralLink, getPatientCashbackSummary, processReferralRegistration } = cashbackService;
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim();
@@ -70,6 +72,10 @@ let pollingRestartInProgress = false;
 
 const LANG_UZ = "🇺🇿 O'zbekcha";
 const LANG_RU = '🇷🇺 Русский';
+const BTN_BALANCE_UZ = '💰 Mening balansim';
+const BTN_REFERRAL_UZ = "🎁 Do'stni taklif qilish";
+const BTN_BALANCE_RU = '💰 Мой баланс';
+const BTN_REFERRAL_RU = '🎁 Пригласить друга';
 
 // FSM state (oddiy object bilan)
 const userStates = {};
@@ -89,9 +95,26 @@ const messages = {
       `/start - Botni boshlash\n` +
       `/language - Tilni o'zgartirish\n` +
       `/register - Ro'yxatdan o'tish (telefon raqam)\n` +
+      `/balance - Keshbek balansi\n` +
+      `/referral - Do'stni taklif qilish\n` +
       `/help - Yordam\n\n` +
       `Telefon raqamingizni yuborsangiz, ShifoCRM tizimida tekshiriladi.\n` +
       `Ro'yxatdan o'tganingizdan keyin sizga qabul eslatmalari va xabarlar yuboriladi.`,
+    balanceTitle: '💰 Mening keshbek balansim',
+    balanceLine: 'Joriy balans: <b>{balance} so\'m</b>',
+    balanceEarned: 'Jami topilgan: {earned} so\'m',
+    balanceSpent: 'Jami ishlatilgan: {spent} so\'m',
+    balanceNeedRegister: 'Avval /register orqali ro\'yxatdan o\'ting.',
+    referralTitle: "🎁 Do'stni taklif qilish",
+    referralBody:
+      `Do'stingizga ushbu havolani yuboring.\n` +
+      `U botga ulansa, sizga <b>{bonus} so'm</b> bonus beriladi.\n\n` +
+      `Havola:\n{link}\n\n` +
+      `Takliflar soni: {count}`,
+    referralNeedRegister: 'Referral havola uchun avval /register qiling.',
+    referralNoUsername: 'Bot username sozlanmagan. Administratorga murojaat qiling.',
+    referralPendingSaved: "🎁 Taklif kodi saqlandi. Ro'yxatdan o'ting — do'stingizga bonus beriladi.",
+    cashbackMenuHint: '\n\nMenyu: 💰 Mening balansim | 🎁 Do\'stni taklif qilish',
     registerPrompt:
       `Ro'yxatdan o'tish:\n\n` +
       `Iltimos, pastdagi tugma orqali kontakt yuboring yoki telefon raqamingizni yozing:\n` +
@@ -173,9 +196,26 @@ const messages = {
       `/start - Начать работу с ботом\n` +
       `/language - Сменить язык\n` +
       `/register - Регистрация (номер телефона)\n` +
+      `/balance - Баланс кэшбэка\n` +
+      `/referral - Пригласить друга\n` +
       `/help - Помощь\n\n` +
       `Если отправите номер телефона, он будет проверен в системе ShifoCRM.\n` +
       `После регистрации вы будете получать напоминания о приёмах и сообщения.`,
+    balanceTitle: '💰 Мой кэшбэк-баланс',
+    balanceLine: 'Текущий баланс: <b>{balance} сум</b>',
+    balanceEarned: 'Всего заработано: {earned} сум',
+    balanceSpent: 'Всего потрачено: {spent} сум',
+    balanceNeedRegister: 'Сначала зарегистрируйтесь через /register.',
+    referralTitle: '🎁 Пригласить друга',
+    referralBody:
+      `Отправьте другу эту ссылку.\n` +
+      `Когда он подключится к боту, вы получите бонус <b>{bonus} сум</b>.\n\n` +
+      `Ссылка:\n{link}\n\n` +
+      `Количество приглашений: {count}`,
+    referralNeedRegister: 'Для реферальной ссылки сначала выполните /register.',
+    referralNoUsername: 'Username бота не настроен. Обратитесь к администратору.',
+    referralPendingSaved: '🎁 Код приглашения сохранён. Зарегистрируйтесь — другу начислят бонус.',
+    cashbackMenuHint: '\n\nМеню: 💰 Мой баланс | 🎁 Пригласить друга',
     registerPrompt:
       `Регистрация:\n\n` +
       `Пожалуйста, отправьте контакт через кнопку ниже или введите номер телефона:\n` +
@@ -368,11 +408,131 @@ async function sendLanguagePicker(chatId, localeMaybe = 'uz') {
 }
 
 async function sendHelp(chatId) {
-  await bot.sendMessage(chatId, t(chatId, 'help'));
+  await bot.sendMessage(chatId, t(chatId, 'help'), {
+    reply_markup: buildPatientMenuKeyboard(chatId),
+  });
 }
 
 async function sendStartWelcome(chatId) {
-  await bot.sendMessage(chatId, t(chatId, 'startWelcome'));
+  await bot.sendMessage(chatId, t(chatId, 'startWelcome') + t(chatId, 'cashbackMenuHint'), {
+    reply_markup: buildPatientMenuKeyboard(chatId),
+  });
+}
+
+function buildPatientMenuKeyboard(chatId) {
+  const locale = getUserLocale(chatId);
+  const balanceBtn = locale === 'ru' ? BTN_BALANCE_RU : BTN_BALANCE_UZ;
+  const referralBtn = locale === 'ru' ? BTN_REFERRAL_RU : BTN_REFERRAL_UZ;
+  return {
+    keyboard: [[{ text: balanceBtn }, { text: referralBtn }]],
+    resize_keyboard: true,
+  };
+}
+
+function isBalanceButton(text) {
+  return text === BTN_BALANCE_UZ || text === BTN_BALANCE_RU || text === '/balance';
+}
+
+function isReferralButton(text) {
+  return text === BTN_REFERRAL_UZ || text === BTN_REFERRAL_RU || text === '/referral';
+}
+
+async function sendBalanceInfo(chatId) {
+  try {
+    const patientId = await getPatientIdByChatId(chatId);
+    if (!patientId) {
+      await bot.sendMessage(chatId, t(chatId, 'balanceNeedRegister'));
+      return;
+    }
+
+    const summary = await getPatientCashbackSummary(patientId);
+    const text =
+      `${t(chatId, 'balanceTitle')}\n\n` +
+      `${t(chatId, 'balanceLine', { balance: formatMoney(summary.balance) })}\n` +
+      `${t(chatId, 'balanceEarned', { earned: formatMoney(summary.lifetime_earned) })}\n` +
+      `${t(chatId, 'balanceSpent', { spent: formatMoney(summary.lifetime_spent) })}`;
+
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'HTML',
+      reply_markup: buildPatientMenuKeyboard(chatId),
+    });
+  } catch (err) {
+    console.error('❌ Balance xatolik:', err?.message || err);
+    await bot.sendMessage(chatId, t(chatId, 'genericError'));
+  }
+}
+
+async function sendReferralInfo(chatId) {
+  try {
+    const patientId = await getPatientIdByChatId(chatId);
+    if (!patientId) {
+      await bot.sendMessage(chatId, t(chatId, 'referralNeedRegister'));
+      return;
+    }
+
+    const summary = await getPatientCashbackSummary(patientId);
+    const link = summary.referral_link || buildReferralLink(patientId);
+    if (!link) {
+      await bot.sendMessage(chatId, t(chatId, 'referralNoUsername'));
+      return;
+    }
+
+    await bot.sendMessage(
+      chatId,
+      `${t(chatId, 'referralTitle')}\n\n` +
+        t(chatId, 'referralBody', {
+          bonus: formatMoney(summary.referral_bonus_amount),
+          link,
+          count: summary.referrals_count,
+        }),
+      {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: buildPatientMenuKeyboard(chatId),
+      }
+    );
+  } catch (err) {
+    console.error('❌ Referral xatolik:', err?.message || err);
+    await bot.sendMessage(chatId, t(chatId, 'genericError'));
+  }
+}
+
+async function handleReferralDeepLink({ chatId, referrerPatientId }) {
+  if (!referrerPatientId) {
+    return;
+  }
+
+  const ownPatientId = await getPatientIdByChatId(chatId);
+  if (ownPatientId && String(ownPatientId) === String(referrerPatientId)) {
+    await bot.sendMessage(chatId, t(chatId, 'startWelcome'), {
+      reply_markup: buildPatientMenuKeyboard(chatId),
+    });
+    return;
+  }
+
+  const existing = getUserState(chatId) || {};
+  setUserState(chatId, {
+    ...existing,
+    pendingReferrerId: String(referrerPatientId),
+  });
+
+  if (ownPatientId) {
+    try {
+      await processReferralRegistration({
+        bot,
+        referrerPatientId,
+        referredPatientId: ownPatientId,
+        referredChatId: String(chatId),
+      });
+    } catch (err) {
+      console.error('❌ Referral process xatolik:', err?.message || err);
+    }
+    await sendStartWelcome(chatId);
+    return;
+  }
+
+  await bot.sendMessage(chatId, t(chatId, 'referralPendingSaved'));
+  await startRegister(chatId);
 }
 
 async function notifyAdminError(title, context = {}) {
@@ -410,6 +570,7 @@ async function startRegister(chatId) {
   setUserState(chatId, {
     step: 'waiting_phone',
     pendingLeadId: existing?.pendingLeadId || null,
+    pendingReferrerId: existing?.pendingReferrerId || null,
   });
   await bot.sendMessage(chatId, t(chatId, 'registerPrompt'), {
     reply_markup: {
@@ -458,6 +619,12 @@ function parseStartPayload(text) {
   if (leadMatch) {
     return { type: 'lead', leadId: leadMatch[1] };
   }
+
+  const refMatch = raw.match(/^ref[_-]?(.+)$/i);
+  if (refMatch) {
+    return { type: 'ref', referrerPatientId: refMatch[1] };
+  }
+
   return null;
 }
 
@@ -495,7 +662,7 @@ async function handleLeadDeepLink({ chatId, leadId, msg }) {
   );
 }
 
-// /start (deep link: /start lead_123)
+// /start (deep link: /start lead_123 | /start ref_33410)
 bot.onText(/\/start(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   const chatId = msg.chat.id;
   const payload = parseStartPayload(match?.[1]);
@@ -514,6 +681,24 @@ bot.onText(/\/start(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
     }
 
     await handleLeadDeepLink({ chatId, leadId: payload.leadId, msg });
+    return;
+  }
+
+  if (payload?.type === 'ref' && payload.referrerPatientId) {
+    if (!hasUserLocale(chatId)) {
+      setUserState(chatId, {
+        step: 'waiting_language',
+        pendingCommand: 'start',
+        pendingReferrerId: String(payload.referrerPatientId),
+      });
+      await sendLanguagePicker(chatId, getUserLocale(chatId));
+      return;
+    }
+
+    await handleReferralDeepLink({
+      chatId,
+      referrerPatientId: payload.referrerPatientId,
+    });
     return;
   }
 
@@ -549,6 +734,30 @@ bot.onText(/\/register/, async (msg) => {
     return;
   }
   await startRegister(chatId);
+});
+
+// /balance
+bot.onText(/\/balance/, async (msg) => {
+  const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
+  if (!hasUserLocale(chatId)) {
+    setUserState(chatId, { step: 'waiting_language', pendingCommand: 'balance' });
+    await sendLanguagePicker(chatId, 'uz');
+    return;
+  }
+  await sendBalanceInfo(chatId);
+});
+
+// /referral
+bot.onText(/\/referral/, async (msg) => {
+  const chatId = msg.chat.id;
+  await ensureUserLocale(chatId);
+  if (!hasUserLocale(chatId)) {
+    setUserState(chatId, { step: 'waiting_language', pendingCommand: 'referral' });
+    await sendLanguagePicker(chatId, 'uz');
+    return;
+  }
+  await sendReferralInfo(chatId);
 });
 
 // /doctor
@@ -603,6 +812,7 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
   const phone = normalizePhone(phoneRaw);
   const stateBeforeRegister = getUserState(chatId);
   const preferredLeadId = stateBeforeRegister?.pendingLeadId || null;
+  const pendingReferrerId = stateBeforeRegister?.pendingReferrerId || null;
   let patient = null;
 
   // ShifoCRM'dan telefon bo'yicha qidirish
@@ -652,7 +862,7 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
       await bot.sendMessage(
         chatId,
         t(chatId, 'successRegistration', { patientName, roleName, patientId, phone }),
-        { reply_markup: { remove_keyboard: true } }
+        { reply_markup: buildPatientMenuKeyboard(chatId) }
       );
 
       if (linkedLeads.length > 0) {
@@ -660,6 +870,19 @@ async function registerUserByPhone({ chatId, phoneRaw, msg }) {
           chatId,
           `🔗 Lead(lar) Telegram bilan bog'landi: ${linkedLeads.join(', ')}`
         );
+      }
+
+      if (pendingReferrerId && !isLead) {
+        try {
+          await processReferralRegistration({
+            bot,
+            referrerPatientId: pendingReferrerId,
+            referredPatientId: patientId,
+            referredChatId: String(chatId),
+          });
+        } catch (referralErr) {
+          console.error('❌ Referral bonus xatolik:', referralErr?.message || referralErr);
+        }
       }
     } else {
       console.error('❌ saveTelegramChatId false qaytdi');
@@ -1032,6 +1255,7 @@ bot.on('message', async (msg) => {
 
       const pendingCommand = state.pendingCommand;
       const pendingLeadId = state.pendingLeadId || null;
+      const pendingReferrerId = state.pendingReferrerId || null;
       clearUserState(chatId);
 
       await bot.sendMessage(chatId, messages[selectedLocale].languageSelected, {
@@ -1041,13 +1265,26 @@ bot.on('message', async (msg) => {
       if (pendingCommand === 'help') {
         await sendHelp(chatId);
       } else if (pendingCommand === 'register') {
+        if (pendingReferrerId) {
+          setUserState(chatId, { pendingReferrerId: String(pendingReferrerId) });
+        }
         await startRegister(chatId);
+      } else if (pendingCommand === 'balance') {
+        await sendBalanceInfo(chatId);
+      } else if (pendingCommand === 'referral') {
+        await sendReferralInfo(chatId);
       } else if (pendingCommand === 'start' && pendingLeadId) {
         await handleLeadDeepLink({ chatId, leadId: pendingLeadId, msg });
+      } else if (pendingCommand === 'start' && pendingReferrerId) {
+        await handleReferralDeepLink({ chatId, referrerPatientId: pendingReferrerId });
       } else if (pendingCommand === 'language') {
         await sendStartWelcome(chatId);
       } else {
-        await sendStartWelcome(chatId);
+        if (pendingReferrerId) {
+          await handleReferralDeepLink({ chatId, referrerPatientId: pendingReferrerId });
+        } else {
+          await sendStartWelcome(chatId);
+        }
       }
       return;
     }
@@ -1072,6 +1309,26 @@ bot.on('message', async (msg) => {
 
     await bot.sendMessage(chatId, t(chatId, 'languageInvalid'));
     await sendLanguagePicker(chatId, getUserLocale(chatId));
+    return;
+  }
+
+  // Cashback menyu tugmalari
+  if (text && (isBalanceButton(text) || isReferralButton(text))) {
+    if (!hasUserLocale(chatId)) {
+      setUserState(chatId, {
+        step: 'waiting_language',
+        pendingCommand: isBalanceButton(text) ? 'balance' : 'referral',
+      });
+      await sendLanguagePicker(chatId, 'uz');
+      return;
+    }
+
+    if (isBalanceButton(text)) {
+      await sendBalanceInfo(chatId);
+      return;
+    }
+
+    await sendReferralInfo(chatId);
     return;
   }
   

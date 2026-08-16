@@ -136,6 +136,14 @@ export async function sendDebtReminder({ patientId, amount, dueDate }) {
   return sendTelegramNotification({ patientId, message });
 }
 
+export {
+  applyPaymentCashback,
+  buildReferralDeepLink,
+  earnCashback,
+  getCashbackBalance,
+  spendCashback,
+} from './cashbackApi.example.js';
+
 export function buildTelegramLeadDeepLink({ botUsername, leadId }) {
   const username = String(botUsername || '').replace(/^@/, '');
   if (!username || !leadId) {
