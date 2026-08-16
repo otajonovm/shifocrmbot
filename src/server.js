@@ -34,6 +34,8 @@ app.get('/health', (req, res) => {
   const telegram = getTelegramModeInfo();
   res.json({
     ok: telegram.telegramReady !== false,
+    version: 'cashback-v1',
+    features: ['webhook', 'cashback', 'referral'],
     telegram,
     timestamp: new Date().toISOString(),
   });
