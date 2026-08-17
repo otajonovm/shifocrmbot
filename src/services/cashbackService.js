@@ -7,6 +7,40 @@ const BOT_USERNAME = String(process.env.TELEGRAM_BOT_USERNAME || process.env.VIT
   .replace(/^@/, '')
   .trim();
 
+let cachedBotUsername = BOT_USERNAME;
+
+async function resolveBotUsername() {
+  if (cachedBotUsername) {
+    return cachedBotUsername;
+  }
+
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const payload = await response.json().catch(() => ({}));
+    if (payload?.ok && payload?.result?.username) {
+      cachedBotUsername = String(payload.result.username).replace(/^@/, '');
+      console.log(`ℹ️ Bot username Telegram dan olindi: @${cachedBotUsername}`);
+      return cachedBotUsername;
+    }
+  } catch (err) {
+    console.warn('⚠️ Bot username olishda xatolik:', err?.message || err);
+  }
+
+  return null;
+}
+
+function buildReferralLink(patientId, usernameOverride) {
+  const username = usernameOverride || cachedBotUsername || BOT_USERNAME;
+  if (!username || !patientId) {
+    return null;
+  }
+  return `https://t.me/${username}?start=ref_${patientId}`;
+}
 function formatMoney(amount) {
   const value = cashbackRepo.toMoney(amount);
   return value.toLocaleString('uz-UZ', {
@@ -21,13 +55,6 @@ function resolvePercent(override) {
     return CASHBACK_PERCENT;
   }
   return percent;
-}
-
-function buildReferralLink(patientId) {
-  if (!BOT_USERNAME || !patientId) {
-    return null;
-  }
-  return `https://t.me/${BOT_USERNAME}?start=ref_${patientId}`;
 }
 
 async function notifyPatient(bot, patientId, message) {
@@ -250,14 +277,41 @@ async function processReferralRegistration({
 
 async function getPatientCashbackSummary(patientId) {
   const balance = await cashbackRepo.getBalance(patientId);
-  const referralsCount = await cashbackRepo.countReferrals(patientId);
+  const referralsCount = balance.setup_required
+    ? 0
+    : await cashbackRepo.countReferrals(patientId);
+  const username = await resolveBotUsername();
+
   return {
     ...balance,
     referrals_count: referralsCount,
-    referral_link: buildReferralLink(patientId),
+    referral_link: buildReferralLink(patientId, username),
+    bot_username: username,
     cashback_percent: CASHBACK_PERCENT,
     referral_bonus_amount: cashbackRepo.toMoney(REFERRAL_BONUS_AMOUNT),
   };
+}
+
+async function checkCashbackSetup() {
+  try {
+    const probe = await cashbackRepo.getBalance('__setup_probe__');
+    if (probe.setup_required) {
+      return {
+        ok: false,
+        reason: probe.setup_reason || 'TABLES_MISSING',
+        message: probe.setup_reason === 'PERMISSION_DENIED'
+          ? 'SUPABASE_SERVICE_KEY service_role emas yoki RLS ruxsat bermaydi'
+          : 'migrations/007_cashback_system.sql Supabase da ishga tushiring',
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'CHECK_FAILED',
+      message: err?.message || String(err),
+    };
+  }
 }
 
 module.exports = {
@@ -265,9 +319,11 @@ module.exports = {
   CASHBACK_PERCENT,
   REFERRAL_BONUS_AMOUNT,
   buildReferralLink,
+  checkCashbackSetup,
   earnCashback,
   formatMoney,
   getPatientCashbackSummary,
   processReferralRegistration,
+  resolveBotUsername,
   spendCashback,
 };

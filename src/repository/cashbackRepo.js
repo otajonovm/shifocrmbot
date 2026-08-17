@@ -8,6 +8,35 @@ function toMoney(value) {
   return Math.round(num * 100) / 100;
 }
 
+function isMissingTableError(error) {
+  const msg = String(error?.message || error?.details || '').toLowerCase();
+  const code = String(error?.code || '');
+  return (
+    code === 'PGRST205'
+    || code === '42P01'
+    || msg.includes('does not exist')
+    || msg.includes('could not find the table')
+    || msg.includes('patient_cashback_balances')
+    || msg.includes('patient_referrals')
+    || msg.includes('cashback_transactions')
+  );
+}
+
+function isPermissionError(error) {
+  const msg = String(error?.message || error?.details || '').toLowerCase();
+  const code = String(error?.code || '');
+  return code === '42501' || msg.includes('permission denied') || msg.includes('row-level security');
+}
+
+function emptyBalance(patientId) {
+  return {
+    patient_id: String(patientId),
+    balance: 0,
+    lifetime_earned: 0,
+    lifetime_spent: 0,
+  };
+}
+
 async function getOrCreateBalance(patientId) {
   const id = String(patientId);
   const { data, error } = await supabase
@@ -53,13 +82,24 @@ async function getOrCreateBalance(patientId) {
 }
 
 async function getBalance(patientId) {
-  const row = await getOrCreateBalance(patientId);
-  return {
-    patient_id: String(row.patient_id),
-    balance: toMoney(row.balance),
-    lifetime_earned: toMoney(row.lifetime_earned),
-    lifetime_spent: toMoney(row.lifetime_spent),
-  };
+  try {
+    const row = await getOrCreateBalance(patientId);
+    return {
+      patient_id: String(row.patient_id),
+      balance: toMoney(row.balance),
+      lifetime_earned: toMoney(row.lifetime_earned),
+      lifetime_spent: toMoney(row.lifetime_spent),
+      setup_required: false,
+    };
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return { ...emptyBalance(patientId), setup_required: true, setup_reason: 'TABLES_MISSING' };
+    }
+    if (isPermissionError(error)) {
+      return { ...emptyBalance(patientId), setup_required: true, setup_reason: 'PERMISSION_DENIED' };
+    }
+    throw error;
+  }
 }
 
 async function findTransactionByPayment({ patientId, paymentId, type }) {
@@ -272,26 +312,39 @@ async function markReferralBonusPaid(referralId) {
 }
 
 async function countReferrals(referrerPatientId) {
-  const { count, error } = await supabase
-    .from('patient_referrals')
-    .select('id', { count: 'exact', head: true })
-    .eq('referrer_patient_id', String(referrerPatientId));
+  try {
+    const { count, error } = await supabase
+      .from('patient_referrals')
+      .select('id', { count: 'exact', head: true })
+      .eq('referrer_patient_id', String(referrerPatientId));
 
-  if (error) {
+    if (error) {
+      if (isMissingTableError(error) || isPermissionError(error)) {
+        return 0;
+      }
+      throw error;
+    }
+
+    return count || 0;
+  } catch (error) {
+    if (isMissingTableError(error) || isPermissionError(error)) {
+      return 0;
+    }
     throw error;
   }
-
-  return count || 0;
 }
 
 module.exports = {
   applyBalanceChange,
   countReferrals,
   createReferralLink,
+  emptyBalance,
   findTransactionByPayment,
   getBalance,
   getOrCreateBalance,
   getReferralByReferred,
+  isMissingTableError,
+  isPermissionError,
   markReferralBonusPaid,
   toMoney,
 };

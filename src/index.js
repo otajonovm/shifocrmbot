@@ -15,6 +15,7 @@ const {
   getWebhookUrl,
   printCloudWebhookSetupInstructions,
 } = require('./utils/telegramMode');
+const { checkCashbackSetup } = require('./services/cashbackService');
 const { testTelegramApiConnectivity } = require('./services/telegramConnectivityService');
 
 // Debug: Environment variables mavjudligini tekshirish
@@ -68,6 +69,13 @@ const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, async () => {
   console.log(`✅ Server ishga tushdi: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log('📦 App version: cashback-v1 (balance + referral)');
+
+  const cashbackSetup = await checkCashbackSetup();
+  if (cashbackSetup.ok) {
+    console.log('✅ Cashback jadvallari tayyor');
+  } else {
+    console.warn('⚠️ Cashback sozlash kerak:', cashbackSetup.message);
+  }
 
   const modeInfo = getTelegramModeInfo();
 

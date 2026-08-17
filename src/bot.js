@@ -113,6 +113,12 @@ const messages = {
       `Takliflar soni: {count}`,
     referralNeedRegister: 'Referral havola uchun avval /register qiling.',
     referralNoUsername: 'Bot username sozlanmagan. Administratorga murojaat qiling.',
+    cashbackNotConfigured:
+      '⚠️ Keshbek tizimi hali to\'liq sozlanmagan.\n\n' +
+      'Administrator: Supabase da migrations/007_cashback_system.sql ni ishga tushiring va SUPABASE_SERVICE_KEY (service_role) ishlating.',
+    cashbackPermissionError:
+      '⚠️ Keshbek ma\'lumotlariga ruxsat yo\'q.\n\n' +
+      'DigitalOcean da SUPABASE_SERVICE_KEY = Supabase service_role key bo\'lishi kerak (anon emas).',
     referralPendingSaved: "🎁 Taklif kodi saqlandi. Ro'yxatdan o'ting — do'stingizga bonus beriladi.",
     cashbackMenuHint: '\n\nMenyu: 💰 Mening balansim | 🎁 Do\'stni taklif qilish',
     registerPrompt:
@@ -214,6 +220,12 @@ const messages = {
       `Количество приглашений: {count}`,
     referralNeedRegister: 'Для реферальной ссылки сначала выполните /register.',
     referralNoUsername: 'Username бота не настроен. Обратитесь к администратору.',
+    cashbackNotConfigured:
+      '⚠️ Система кэшбэка ещё не настроена.\n\n' +
+      'Администратор: выполните migrations/007_cashback_system.sql в Supabase и используйте SUPABASE_SERVICE_KEY (service_role).',
+    cashbackPermissionError:
+      '⚠️ Нет доступа к данным кэшбэка.\n\n' +
+      'В DigitalOcean SUPABASE_SERVICE_KEY должен быть service_role key (не anon).',
     referralPendingSaved: '🎁 Код приглашения сохранён. Зарегистрируйтесь — другу начислят бонус.',
     cashbackMenuHint: '\n\nМеню: 💰 Мой баланс | 🎁 Пригласить друга',
     registerPrompt:
@@ -446,6 +458,14 @@ async function sendBalanceInfo(chatId) {
     }
 
     const summary = await getPatientCashbackSummary(patientId);
+    if (summary.setup_required) {
+      const msg = summary.setup_reason === 'PERMISSION_DENIED'
+        ? t(chatId, 'cashbackPermissionError')
+        : t(chatId, 'cashbackNotConfigured');
+      await bot.sendMessage(chatId, msg, { reply_markup: buildPatientMenuKeyboard(chatId) });
+      return;
+    }
+
     const text =
       `${t(chatId, 'balanceTitle')}\n\n` +
       `${t(chatId, 'balanceLine', { balance: formatMoney(summary.balance) })}\n` +
@@ -457,7 +477,7 @@ async function sendBalanceInfo(chatId) {
       reply_markup: buildPatientMenuKeyboard(chatId),
     });
   } catch (err) {
-    console.error('❌ Balance xatolik:', err?.message || err);
+    console.error('❌ Balance xatolik:', err?.message || err, err?.code || '');
     await bot.sendMessage(chatId, t(chatId, 'genericError'));
   }
 }
@@ -471,9 +491,19 @@ async function sendReferralInfo(chatId) {
     }
 
     const summary = await getPatientCashbackSummary(patientId);
+    if (summary.setup_required) {
+      const msg = summary.setup_reason === 'PERMISSION_DENIED'
+        ? t(chatId, 'cashbackPermissionError')
+        : t(chatId, 'cashbackNotConfigured');
+      await bot.sendMessage(chatId, msg, { reply_markup: buildPatientMenuKeyboard(chatId) });
+      return;
+    }
+
     const link = summary.referral_link || buildReferralLink(patientId);
     if (!link) {
-      await bot.sendMessage(chatId, t(chatId, 'referralNoUsername'));
+      await bot.sendMessage(chatId, t(chatId, 'referralNoUsername'), {
+        reply_markup: buildPatientMenuKeyboard(chatId),
+      });
       return;
     }
 
@@ -492,7 +522,7 @@ async function sendReferralInfo(chatId) {
       }
     );
   } catch (err) {
-    console.error('❌ Referral xatolik:', err?.message || err);
+    console.error('❌ Referral xatolik:', err?.message || err, err?.code || '');
     await bot.sendMessage(chatId, t(chatId, 'genericError'));
   }
 }
