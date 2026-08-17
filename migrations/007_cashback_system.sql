@@ -53,3 +53,8 @@ CREATE TRIGGER update_patient_cashback_balances_updated_at
 BEFORE UPDATE ON patient_cashback_balances
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+GRANT ALL ON TABLE public.patient_cashback_balances TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.cashback_transactions TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.patient_referrals TO anon, authenticated, service_role;
+NOTIFY pgrst, 'reload schema';

@@ -14,11 +14,8 @@ function isMissingTableError(error) {
   return (
     code === 'PGRST205'
     || code === '42P01'
-    || msg.includes('does not exist')
-    || msg.includes('could not find the table')
-    || msg.includes('patient_cashback_balances')
-    || msg.includes('patient_referrals')
-    || msg.includes('cashback_transactions')
+    || ((msg.includes('does not exist') || msg.includes('could not find the table') || msg.includes('schema cache'))
+      && (msg.includes('patient_cashback') || msg.includes('patient_referrals') || msg.includes('cashback_transactions')))
   );
 }
 
@@ -92,6 +89,7 @@ async function getBalance(patientId) {
       setup_required: false,
     };
   } catch (error) {
+    console.error('❌ Cashback getBalance xatolik:', error?.code || '', error?.message || error);
     if (isMissingTableError(error)) {
       return { ...emptyBalance(patientId), setup_required: true, setup_reason: 'TABLES_MISSING' };
     }
