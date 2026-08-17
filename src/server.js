@@ -5,6 +5,7 @@ const patientCompletionApi = require('./api/patientCompletionApi');
 const doctorReminderApi = require('./api/doctorReminderApi');
 const createCashbackApi = require('./api/cashbackApi');
 const supabase = require('./supabase');
+const { supabaseKeyRole } = supabase;
 const { startScheduler, stopScheduler, runAppointmentReminderCycle } = require('./services/messageScheduler');
 const { startDoctorReminderScheduler, stopDoctorReminderScheduler, runDoctorReminderCycle } = require('./services/doctorReminderService');
 const dailySummaryService = require('./services/dailySummaryService');
@@ -36,6 +37,7 @@ app.get('/health', (req, res) => {
     ok: telegram.telegramReady !== false,
     version: 'cashback-v1',
     features: ['webhook', 'cashback', 'referral'],
+    supabaseKeyRole,
     telegram,
     timestamp: new Date().toISOString(),
   });
