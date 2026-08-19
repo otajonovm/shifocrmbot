@@ -14,19 +14,28 @@ function isCloudRuntime() {
     process.env.DIGITALOCEAN_APP_ID ||
     process.env.FLY_APP_NAME ||
     process.env.RENDER ||
+    process.env.DYNO ||
     (process.env.NODE_ENV === 'production' && process.env.PORT)
   );
+}
+
+function isHeroku() {
+  return !!process.env.DYNO;
 }
 
 function resolvePublicBaseUrl() {
   const candidates = [
     process.env.PUBLIC_APP_URL,
     process.env.APP_URL,
+    process.env.HEROKU_APP_URL,
     process.env.DIGITALOCEAN_APP_URL,
     process.env.APP_DOMAIN,
-    // Ba'zi deploylarda VITE_ prefiks bilan qo'yilgan (ShifoCRM uchun, lekin URL bir xil)
     process.env.VITE_TELEGRAM_API_URL,
   ];
+
+  if (isHeroku() && process.env.HEROKU_APP_NAME) {
+    candidates.push(`https://${process.env.HEROKU_APP_NAME}.herokuapp.com`);
+  }
 
   for (const value of candidates) {
     const trimmed = String(value || '').trim();
@@ -145,6 +154,7 @@ module.exports = {
   getWebhookPath,
   getWebhookUrl,
   isCloudRuntime,
+  isHeroku,
   isPrivateOrLocalUrl,
   isWebhookMode,
   printCloudWebhookSetupInstructions,

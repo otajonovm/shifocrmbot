@@ -44,8 +44,11 @@ async function setupTelegramWebhook(bot) {
     return { ok: false, error: 'WEBHOOK_URL_MISSING' };
   }
 
-  if (process.env.TELEGRAM_AUTO_SET_WEBHOOK === 'false' || (isCloudRuntime() && process.env.TELEGRAM_AUTO_SET_WEBHOOK !== 'true')) {
-    console.log('ℹ️ Pod ichidan setWebhook o\'tkazib yuborildi (DigitalOcean outbound ETIMEDOUT)');
+  const { isHeroku } = require('../utils/telegramMode');
+  const heroku = isHeroku();
+
+  if (!heroku && (process.env.TELEGRAM_AUTO_SET_WEBHOOK === 'false' || (isCloudRuntime() && process.env.TELEGRAM_AUTO_SET_WEBHOOK !== 'true'))) {
+    console.log('ℹ️ Pod ichidan setWebhook o\'tkazib yuborildi (outbound ETIMEDOUT)');
     console.log('   Webhook route faol — localdan bir marta o\'rnating: npm run set-webhook');
     console.log(`   URL: ${webhookUrl}`);
     return { ok: false, skipped: true, reason: 'AUTO_SET_SKIPPED' };
